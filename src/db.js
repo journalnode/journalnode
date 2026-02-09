@@ -1,49 +1,42 @@
-const Database = require('better-sqlite3');
+const fs = require('fs');
 const path = require('path');
 
-const DB_PATH = path.join(__dirname, '..', 'journal.db');
+const DB_PATH = path.join(__dirname, '..', 'journal.json');
 
-let db;
+let data;
 
-function getDb() {
-  if (!db) {
-    db = new Database(DB_PATH);
-    db.pragma('journal_mode = WAL');
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS journal_entries (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id TEXT NOT NULL,
-        username TEXT NOT NULL,
-        content TEXT NOT NULL,
-        timestamp_utc TEXT NOT NULL,
-        word_count INTEGER NOT NULL,
-        char_count INTEGER NOT NULL
-      )
-    `);
+function load() {
+  if (!data) {
+    if (fs.existsSync(DB_PATH)) {
+      data = JSON.parse(fs.readFileSync(DB_PATH, 'utf-8'));
+    } else {
+      data = { nextId: 1, entries: [] };
+      save();
+    }
   }
-  return db;
+  return data;
+}
+
+function save() {
+  fs.writeFileSync(DB_PATH, JSON.stringify(data, null, 2), 'utf-8');
 }
 
 function insertEntry({ userId, username, content, timestampUtc }) {
   const wordCount = content.split(/\s+/).filter(Boolean).length;
   const charCount = content.length;
-  const stmt = getDb().prepare(`
-    INSERT INTO journal_entries (user_id, username, content, timestamp_utc, word_count, char_count)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `);
-  const info = stmt.run(userId, username, content, timestampUtc, wordCount, charCount);
-  return { id: info.lastInsertRowid, wordCount, charCount };
+  const store = load();
+  const id = store.nextId++;
+  store.entries.push({ id, userId, username, content, timestampUtc, wordCount, charCount });
+  save();
+  return { id, wordCount, charCount };
 }
 
 function getEntryById(id) {
-  return getDb().prepare('SELECT * FROM journal_entries WHERE id = ?').get(id);
+  return load().entries.find(e => e.id === id) || null;
 }
 
 function close() {
-  if (db) {
-    db.close();
-    db = null;
-  }
+  // no-op for JSON store, kept for API compatibility
 }
 
-module.exports = { getDb, insertEntry, getEntryById, close };
+module.exports = { insertEntry, getEntryById, close };

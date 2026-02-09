@@ -1,6 +1,6 @@
 # Journal Node
 
-A Discord bot for honest self-reflection and journaling. Every message you send is timestamped, stored in a local SQLite database, and acknowledged — forming the core **Input Loop**.
+A Discord bot for honest self-reflection and journaling. Every message you send is timestamped, stored locally, and acknowledged — forming the core **Input Loop**.
 
 ## Setup
 
@@ -18,7 +18,11 @@ A Discord bot for honest self-reflection and journaling. Every message you send 
 ### 2. Configure Environment
 
 ```bash
+# macOS / Linux
 cp .env.example .env
+
+# Windows PowerShell
+copy .env.example .env
 ```
 
 Edit `.env` and paste your bot token. Optionally set `JOURNAL_CHANNEL_ID` to restrict the bot to a single channel.
@@ -34,20 +38,24 @@ The bot will log `Journal Node online` when ready. Send any message in the confi
 
 ## Database
 
-Entries are stored in `journal.db` (SQLite) at the project root. Each entry records:
+Entries are stored in `journal.json` at the project root. Each entry records:
 
-| Column | Description |
+| Field | Description |
 |---|---|
-| `id` | Auto-incrementing primary key |
-| `user_id` | Discord user ID |
+| `id` | Auto-incrementing ID |
+| `userId` | Discord user ID |
 | `username` | Discord username at time of entry |
 | `content` | Full message text |
-| `timestamp_utc` | ISO 8601 UTC timestamp |
-| `word_count` | Number of words |
-| `char_count` | Number of characters |
+| `timestampUtc` | ISO 8601 UTC timestamp |
+| `wordCount` | Number of words |
+| `charCount` | Number of characters |
 
-You can inspect the database with any SQLite client:
+You can inspect the entries by opening `journal.json` in any text editor or running:
 
 ```bash
-sqlite3 journal.db "SELECT * FROM journal_entries;"
+# macOS / Linux
+cat journal.json
+
+# Windows PowerShell
+type journal.json
 ```
