@@ -21,7 +21,7 @@ const client = new Client({
   partials: [Partials.Channel],
 });
 
-client.once('ready', () => {
+client.once('clientReady', () => {
   console.log(`Journal Node online — logged in as ${client.user.tag}`);
 });
 
