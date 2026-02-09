@@ -1,0 +1,16 @@
+{
+  "name": "journalnode",
+  "version": "0.1.0",
+  "description": "Journal Node — a Discord bot for honest self-reflection and AI-enabled journaling insights.",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "keywords": ["discord", "journal", "self-improvement"],
+  "license": "MIT",
+  "dependencies": {
+    "better-sqlite3": "^11.7.0",
+    "discord.js": "^14.16.0",
+    "dotenv": "^16.4.0"
+  }
+}
