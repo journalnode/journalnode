@@ -2,6 +2,7 @@ require('dotenv').config();
 
 const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder } = require('discord.js');
 const { fetchJournalEntries } = require('./history');
+const { TIMEFRAME_CHOICES, filterByTimeframe, timeframeLabel } = require('./timeframe');
 
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
 
@@ -12,20 +13,47 @@ if (!DISCORD_TOKEN) {
 
 // Load commands
 const commands = new Map();
-const commandFiles = ['insight', 'rhythm', 'cadence', 'mood', 'length', 'focus', 'topics', 'questions', 'vocab'];
-for (const file of commandFiles) {
+const analysisCommands = ['insight', 'rhythm', 'cadence', 'mood', 'length', 'focus', 'topics', 'questions', 'vocab'];
+for (const file of analysisCommands) {
   const cmd = require(`./commands/${file}`);
   commands.set(cmd.name, cmd);
 }
+const chatCmd = require('./commands/chat');
+commands.set(chatCmd.name, chatCmd);
 
-// Build slash command definitions for Discord API
-const slashCommands = commandFiles.map(file => {
+// Build slash command definitions
+function addTimeframeOption(builder) {
+  return builder.addStringOption(opt =>
+    opt.setName('timeframe')
+      .setDescription('Time period to analyze (default: all time)')
+      .setRequired(false)
+      .addChoices(...TIMEFRAME_CHOICES)
+  );
+}
+
+const slashCommands = [];
+
+// Analysis commands: name + description + timeframe option
+for (const file of analysisCommands) {
   const cmd = require(`./commands/${file}`);
-  return new SlashCommandBuilder()
+  const builder = new SlashCommandBuilder()
     .setName(cmd.name)
-    .setDescription(cmd.description)
-    .toJSON();
-});
+    .setDescription(cmd.description);
+  addTimeframeOption(builder);
+  slashCommands.push(builder.toJSON());
+}
+
+// /chat: message (required) + timeframe option
+const chatBuilder = new SlashCommandBuilder()
+  .setName('chat')
+  .setDescription(chatCmd.description)
+  .addStringOption(opt =>
+    opt.setName('message')
+      .setDescription('What do you want to ask or discuss?')
+      .setRequired(true)
+  );
+addTimeframeOption(chatBuilder);
+slashCommands.push(chatBuilder.toJSON());
 
 const client = new Client({
   intents: [
@@ -38,12 +66,12 @@ const client = new Client({
 client.once('clientReady', async () => {
   console.log(`Journal Node online — logged in as ${client.user.tag}`);
 
-  // Register slash commands globally
   const rest = new REST({ version: '10' }).setToken(DISCORD_TOKEN);
   try {
     console.log('Registering slash commands...');
     await rest.put(Routes.applicationCommands(client.user.id), { body: slashCommands });
-    console.log(`Registered ${slashCommands.length} slash commands: ${commandFiles.map(c => `/${c}`).join(', ')}`);
+    const allNames = [...analysisCommands, 'chat'].map(c => `/${c}`).join(', ');
+    console.log(`Registered ${slashCommands.length} slash commands: ${allNames}`);
   } catch (err) {
     console.error('Failed to register slash commands:', err);
   }
@@ -55,13 +83,16 @@ client.on('interactionCreate', async (interaction) => {
   const cmd = commands.get(interaction.commandName);
   if (!cmd) return;
 
-  console.log(`[Command] /${interaction.commandName} by ${interaction.user.username}`);
+  const timeframe = interaction.options.getString('timeframe');
+  const tfLabel = timeframeLabel(timeframe);
+  console.log(`[Command] /${interaction.commandName} (${tfLabel}) by ${interaction.user.username}`);
 
   try {
-    // Defer reply since analysis takes time (charts + LLM call)
     await interaction.deferReply();
 
-    const entries = await fetchJournalEntries(interaction.channel, client.user.id);
+    const allEntries = await fetchJournalEntries(interaction.channel, client.user.id);
+    const entries = filterByTimeframe(allEntries, timeframe);
+
     await cmd.execute(interaction, entries);
   } catch (err) {
     console.error(`Command /${interaction.commandName} failed:`, err);
