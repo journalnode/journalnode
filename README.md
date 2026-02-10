@@ -1,6 +1,8 @@
 # Journal Node
 
-A Discord bot for honest self-reflection and journaling. Every message you send is timestamped, stored locally, and acknowledged — forming the core **Input Loop**.
+A Discord bot that lives in your journal channel. Write freely — the bot stays silent (reacts with a notebook emoji). When you want insights, use commands to get AI-powered analysis of your entries read directly from channel history.
+
+**Discord is your database.** No separate storage — the bot reads your messages on demand.
 
 ## Setup
 
@@ -13,9 +15,15 @@ A Discord bot for honest self-reflection and journaling. Every message you send 
 5. Go to **OAuth2 > URL Generator**, select the `bot` scope, then select these permissions:
    - Send Messages
    - Read Message History
+   - Add Reactions
 6. Copy the generated URL and open it in your browser to invite the bot to your server.
 
-### 2. Configure Environment
+### 2. Get an OpenRouter API Key
+
+1. Go to [openrouter.ai/keys](https://openrouter.ai/keys) and create an API key.
+2. Add credits to your account (the insight commands call an LLM).
+
+### 3. Configure Environment
 
 ```bash
 # macOS / Linux
@@ -25,37 +33,32 @@ cp .env.example .env
 copy .env.example .env
 ```
 
-Edit `.env` and paste your bot token. Optionally set `JOURNAL_CHANNEL_ID` to restrict the bot to a single channel.
+Edit `.env` and fill in your `DISCORD_TOKEN` and `OPENROUTER_API_KEY`.
 
-### 3. Install & Run
+### 4. Install & Run
 
 ```bash
 npm install
 npm start
 ```
 
-The bot will log `Journal Node online` when ready. Send any message in the configured channel (or any channel if no channel is configured) and the bot will store it and reply with a confirmation.
+## Commands
 
-## Database
-
-Entries are stored in `journal.json` at the project root. Each entry records:
-
-| Field | Description |
+| Command | What it does |
 |---|---|
-| `id` | Auto-incrementing ID |
-| `userId` | Discord user ID |
-| `username` | Discord username at time of entry |
-| `content` | Full message text |
-| `timestampUtc` | ISO 8601 UTC timestamp |
-| `wordCount` | Number of words |
-| `charCount` | Number of characters |
+| `!help` | List all commands |
+| `!insight` | General AI analysis of your journal |
+| `!rhythm` | When do you write? Time-of-day and day-of-week patterns |
+| `!cadence` | How consistent are you? Streaks, gaps, frequency |
+| `!mood` | Emotional temperature — fear/doubt vs confidence over time |
+| `!length` | Entry length trends — word counts and distribution |
+| `!focus` | Temporal focus — past, present, or future oriented? |
+| `!topics` | Topic evolution — what themes dominate and how they shift |
+| `!questions` | Question density — how much self-interrogation over time |
+| `!vocab` | Vocabulary expansion — language diversity and complexity |
 
-You can inspect the entries by opening `journal.json` in any text editor or running:
+## How It Works
 
-```bash
-# macOS / Linux
-cat journal.json
-
-# Windows PowerShell
-type journal.json
-```
+- **Journal entries**: Any message that doesn't start with `!` is a journal entry. The bot reacts with a notebook emoji and stays silent.
+- **Insight commands**: When you run a command, the bot fetches up to 500 messages from channel history, filters out bot messages and commands, and sends the entries to an LLM via OpenRouter for analysis.
+- **No local database**: Your Discord channel IS the journal. The bot reads it on demand.
