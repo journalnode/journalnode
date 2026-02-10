@@ -1,5 +1,9 @@
-function formatEntries(entries) {
-  return entries.map(e => {
+const { AttachmentBuilder } = require('discord.js');
+
+function formatEntries(entries, limit = 50) {
+  const subset = entries.length > limit ? entries.slice(-limit) : entries;
+  const note = entries.length > limit ? `(showing most recent ${limit} of ${entries.length} entries)\n\n` : '';
+  return note + subset.map(e => {
     const ts = e.timestamp.toISOString();
     return `[${ts}] (${e.wordCount} words) ${e.content}`;
   }).join('\n\n');
@@ -36,4 +40,12 @@ async function sendLong(message, text) {
   }
 }
 
-module.exports = { formatEntries, summarizeStats, sendLong };
+async function sendCharts(message, chartBuffers) {
+  if (chartBuffers.length === 0) return;
+  const files = chartBuffers.map((buf, i) =>
+    new AttachmentBuilder(buf, { name: `chart_${i + 1}.png` })
+  );
+  await message.channel.send({ files });
+}
+
+module.exports = { formatEntries, summarizeStats, sendLong, sendCharts };

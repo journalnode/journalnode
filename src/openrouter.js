@@ -1,5 +1,5 @@
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
-const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || 'anthropic/claude-sonnet-4';
+const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || 'anthropic/claude-opus-4.6';
 
 async function chat(systemPrompt, userMessage) {
   if (!OPENROUTER_API_KEY) {
