@@ -15,9 +15,9 @@ Keep it to 3-5 sentences. Speak directly to the user.`;
 
 module.exports = {
   name: 'cadence',
-  description: 'How consistent are you? Shows streaks, gaps, and writing frequency.',
-  async execute(message, entries) {
-    if (entries.length === 0) return message.reply('No journal entries found to analyze.');
+  description: 'How consistent are you? Charts for streaks, gaps, and monthly frequency.',
+  async execute(interaction, entries) {
+    if (entries.length === 0) return interaction.editReply('No journal entries found to analyze.');
 
     const byMonth = entriesByMonth(entries);
     const streaks = computeStreaks(entries);
@@ -33,10 +33,10 @@ module.exports = {
       )),
     ]);
 
-    await sendCharts(message, [chart1, chart2]);
+    await sendCharts(interaction, [chart1, chart2]);
 
     const dataContext = `Entries by month: ${JSON.stringify(byMonth)}\nCurrent streak: ${streaks.current} days\nLongest streak: ${streaks.longest} days\nAvg days between entries: ${streaks.avgGap}\nTotal unique days with entries: ${streaks.totalDays}\nTotal entries: ${entries.length}`;
     const narrative = await chat(SYSTEM_PROMPT, dataContext);
-    await sendLong(message, narrative);
+    await sendLong(interaction, narrative);
   },
 };

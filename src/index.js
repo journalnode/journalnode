@@ -1,10 +1,9 @@
 require('dotenv').config();
 
-const { Client, GatewayIntentBits, Partials } = require('discord.js');
-const { fetchJournalEntries, COMMAND_PREFIX } = require('./history');
+const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder } = require('discord.js');
+const { fetchJournalEntries } = require('./history');
 
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
-const JOURNAL_CHANNEL_ID = process.env.JOURNAL_CHANNEL_ID || null;
 
 if (!DISCORD_TOKEN) {
   console.error('Error: DISCORD_TOKEN is not set. Create a .env file with your bot token.');
@@ -13,67 +12,65 @@ if (!DISCORD_TOKEN) {
 
 // Load commands
 const commands = new Map();
-const commandFiles = ['help', 'insight', 'rhythm', 'cadence', 'mood', 'length', 'focus', 'topics', 'questions', 'vocab'];
+const commandFiles = ['insight', 'rhythm', 'cadence', 'mood', 'length', 'focus', 'topics', 'questions', 'vocab'];
 for (const file of commandFiles) {
   const cmd = require(`./commands/${file}`);
   commands.set(cmd.name, cmd);
 }
+
+// Build slash command definitions for Discord API
+const slashCommands = commandFiles.map(file => {
+  const cmd = require(`./commands/${file}`);
+  return new SlashCommandBuilder()
+    .setName(cmd.name)
+    .setDescription(cmd.description)
+    .toJSON();
+});
 
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
-    GatewayIntentBits.DirectMessages,
   ],
-  partials: [Partials.Channel],
 });
 
-client.once('clientReady', () => {
+client.once('clientReady', async () => {
   console.log(`Journal Node online — logged in as ${client.user.tag}`);
-  console.log(`Commands: ${[...commands.keys()].map(c => `!${c}`).join(', ')}`);
+
+  // Register slash commands globally
+  const rest = new REST({ version: '10' }).setToken(DISCORD_TOKEN);
+  try {
+    console.log('Registering slash commands...');
+    await rest.put(Routes.applicationCommands(client.user.id), { body: slashCommands });
+    console.log(`Registered ${slashCommands.length} slash commands: ${commandFiles.map(c => `/${c}`).join(', ')}`);
+  } catch (err) {
+    console.error('Failed to register slash commands:', err);
+  }
 });
 
-client.on('messageCreate', async (message) => {
-  if (message.author.bot) return;
-  if (JOURNAL_CHANNEL_ID && message.channel.id !== JOURNAL_CHANNEL_ID) return;
+client.on('interactionCreate', async (interaction) => {
+  if (!interaction.isChatInputCommand()) return;
 
-  const content = message.content.trim();
-  if (!content) return;
+  const cmd = commands.get(interaction.commandName);
+  if (!cmd) return;
 
-  // Command handling
-  if (content.startsWith(COMMAND_PREFIX)) {
-    const args = content.slice(COMMAND_PREFIX.length).split(/\s+/);
-    const cmdName = args[0].toLowerCase();
-    const cmd = commands.get(cmdName);
+  console.log(`[Command] /${interaction.commandName} by ${interaction.user.username}`);
 
-    if (!cmd) {
-      await message.reply(`Unknown command \`!${cmdName}\`. Type \`!help\` for available commands.`);
-      return;
-    }
-
-    console.log(`[Command] !${cmdName} by ${message.author.username}`);
-
-    try {
-      if (cmd.name === 'help') {
-        await cmd.execute(message, null, commands);
-      } else {
-        await message.react('🔍');
-        const entries = await fetchJournalEntries(message.channel, client.user.id);
-        await cmd.execute(message, entries);
-      }
-    } catch (err) {
-      console.error(`Command !${cmdName} failed:`, err);
-      await message.reply('Something went wrong running that command. Check your OPENROUTER_API_KEY and try again.').catch(() => {});
-    }
-    return;
-  }
-
-  // Silent logging — no reply, just react
   try {
-    await message.react('📓');
+    // Defer reply since analysis takes time (charts + LLM call)
+    await interaction.deferReply();
+
+    const entries = await fetchJournalEntries(interaction.channel, client.user.id);
+    await cmd.execute(interaction, entries);
   } catch (err) {
-    // Reaction may fail if bot lacks permissions — that's fine, stay silent
+    console.error(`Command /${interaction.commandName} failed:`, err);
+    const errorMsg = 'Something went wrong running that command. Check your OPENROUTER_API_KEY and try again.';
+    if (interaction.deferred || interaction.replied) {
+      await interaction.followUp(errorMsg).catch(() => {});
+    } else {
+      await interaction.reply(errorMsg).catch(() => {});
+    }
   }
 });
 

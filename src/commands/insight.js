@@ -13,15 +13,16 @@ Speak directly to the user. Be real, not generic. Use plain text formatting suit
 
 module.exports = {
   name: 'insight',
-  description: 'General AI-powered analysis of your journal.',
-  async execute(message, entries) {
+  description: 'General AI-powered holistic analysis of your journal.',
+  async execute(interaction, entries) {
     if (entries.length === 0) {
-      return message.reply('No journal entries found to analyze.');
+      return interaction.editReply('No journal entries found to analyze.');
     }
     const stats = summarizeStats(entries);
     const formatted = formatEntries(entries);
     const userMsg = `Here is a summary of the journal:\n${stats}\n\nHere are the journal entries:\n\n${formatted}`;
     const reply = await chat(SYSTEM_PROMPT, userMsg);
-    await sendLong(message, reply);
+    await interaction.editReply(reply.slice(0, 2000));
+    if (reply.length > 2000) await sendLong(interaction, reply.slice(2000));
   },
 };

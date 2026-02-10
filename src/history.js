@@ -1,5 +1,3 @@
-const COMMAND_PREFIX = '!';
-
 async function fetchJournalEntries(channel, botId, limit = 500) {
   const entries = [];
   let lastId = null;
@@ -14,8 +12,9 @@ async function fetchJournalEntries(channel, botId, limit = 500) {
     if (messages.size === 0) break;
 
     for (const msg of messages.values()) {
-      if (msg.author.id === botId) continue;
-      if (msg.content.startsWith(COMMAND_PREFIX)) continue;
+      if (msg.author.bot) continue;
+      if (msg.content.length === 0) continue;
+      if (msg.interaction) continue; // skip slash command invocations
 
       entries.push({
         author: msg.author.username,
@@ -35,4 +34,4 @@ async function fetchJournalEntries(channel, botId, limit = 500) {
   return entries.sort((a, b) => a.timestamp - b.timestamp);
 }
 
-module.exports = { fetchJournalEntries, COMMAND_PREFIX };
+module.exports = { fetchJournalEntries };

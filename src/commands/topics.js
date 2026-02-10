@@ -14,15 +14,16 @@ Be observant and specific. Use plain text formatting suitable for Discord.`;
 
 module.exports = {
   name: 'topics',
-  description: 'What\'s on your mind? Tracks theme and topic evolution.',
-  async execute(message, entries) {
+  description: "What's on your mind? Tracks theme and topic evolution.",
+  async execute(interaction, entries) {
     if (entries.length === 0) {
-      return message.reply('No journal entries found to analyze.');
+      return interaction.editReply('No journal entries found to analyze.');
     }
     const stats = summarizeStats(entries);
     const formatted = formatEntries(entries);
     const userMsg = `Here is a summary of the journal:\n${stats}\n\nHere are the journal entries:\n\n${formatted}`;
     const reply = await chat(SYSTEM_PROMPT, userMsg);
-    await sendLong(message, reply);
+    await interaction.editReply(reply.slice(0, 2000));
+    if (reply.length > 2000) await sendLong(interaction, reply.slice(2000));
   },
 };

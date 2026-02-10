@@ -24,7 +24,7 @@ function summarizeStats(entries) {
 
 const DISCORD_MAX = 2000;
 
-async function sendLong(message, text) {
+async function sendLong(interaction, text) {
   const chunks = [];
   let remaining = text;
   while (remaining.length > DISCORD_MAX) {
@@ -36,16 +36,17 @@ async function sendLong(message, text) {
   if (remaining.length > 0) chunks.push(remaining);
 
   for (const chunk of chunks) {
-    await message.channel.send(chunk);
+    await interaction.channel.send(chunk);
   }
 }
 
-async function sendCharts(message, chartBuffers) {
+async function sendCharts(interaction, chartBuffers) {
   if (chartBuffers.length === 0) return;
   const files = chartBuffers.map((buf, i) =>
     new AttachmentBuilder(buf, { name: `chart_${i + 1}.png` })
   );
-  await message.channel.send({ files });
+  // Use editReply for the first response after deferReply
+  await interaction.editReply({ files });
 }
 
 module.exports = { formatEntries, summarizeStats, sendLong, sendCharts };

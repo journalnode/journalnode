@@ -15,9 +15,9 @@ Keep it to 3-5 sentences. Speak directly to the user.`;
 
 module.exports = {
   name: 'length',
-  description: 'How much are you writing? Word count trends and distribution.',
-  async execute(message, entries) {
-    if (entries.length === 0) return message.reply('No journal entries found to analyze.');
+  description: 'How much are you writing? Charts for word count trends and distribution.',
+  async execute(interaction, entries) {
+    if (entries.length === 0) return interaction.editReply('No journal entries found to analyze.');
 
     const overTime = wordCountOverTime(entries);
     const dist = wordCountDistribution(entries);
@@ -42,10 +42,10 @@ module.exports = {
       )),
     ]);
 
-    await sendCharts(message, [chart1, chart2]);
+    await sendCharts(interaction, [chart1, chart2]);
 
     const dataContext = `Total entries: ${summary.count}\nTotal words: ${summary.total}\nMean: ${summary.mean} words\nMedian: ${summary.median} words\nMin: ${summary.min} words\nMax: ${summary.max} words\nFirst entry word count: ${entries[0].wordCount}\nLast entry word count: ${entries[entries.length - 1].wordCount}`;
     const narrative = await chat(SYSTEM_PROMPT, dataContext);
-    await sendLong(message, narrative);
+    await sendLong(interaction, narrative);
   },
 };

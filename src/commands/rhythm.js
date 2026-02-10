@@ -14,9 +14,9 @@ Keep it to 3-5 sentences. Speak directly to the user. No headers or bullet point
 
 module.exports = {
   name: 'rhythm',
-  description: 'When do you write? Analyzes your writing times and patterns.',
-  async execute(message, entries) {
-    if (entries.length === 0) return message.reply('No journal entries found to analyze.');
+  description: 'When do you write? Charts for day-of-week and time-of-day patterns.',
+  async execute(interaction, entries) {
+    if (entries.length === 0) return interaction.editReply('No journal entries found to analyze.');
 
     const byDay = entriesByDayOfWeek(entries);
     const byTime = entriesByTimeSlot(entries);
@@ -26,10 +26,10 @@ module.exports = {
       renderChart(barChart('Entries by Time of Day', Object.keys(byTime), Object.values(byTime), ORANGE)),
     ]);
 
-    await sendCharts(message, [chart1, chart2]);
+    await sendCharts(interaction, [chart1, chart2]);
 
     const dataContext = `Entries by Day of Week: ${JSON.stringify(byDay)}\nEntries by Time of Day: ${JSON.stringify(byTime)}\nTotal entries: ${entries.length}`;
     const narrative = await chat(SYSTEM_PROMPT, dataContext);
-    await sendLong(message, narrative);
+    await sendLong(interaction, narrative);
   },
 };

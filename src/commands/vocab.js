@@ -15,9 +15,9 @@ Keep it concise — one focused paragraph.`;
 
 module.exports = {
   name: 'vocab',
-  description: 'Is your thinking evolving? Tracks vocabulary diversity and complexity.',
-  async execute(message, entries) {
-    if (entries.length === 0) return message.reply('No journal entries found to analyze.');
+  description: 'Is your thinking evolving? Charts vocabulary diversity over time.',
+  async execute(interaction, entries) {
+    if (entries.length === 0) return interaction.editReply('No journal entries found to analyze.');
 
     const byMonth = vocabByMonth(entries);
     const avgLen = avgWordLength(entries);
@@ -27,11 +27,11 @@ module.exports = {
       lineChart('Unique Words per Month (excluding stop words)', Object.keys(byMonth), Object.values(byMonth))
     );
 
-    await sendCharts(message, [chart]);
+    await sendCharts(interaction, [chart]);
 
     const topFormatted = top.map(([w, c]) => `${w} (${c})`).join(', ');
     const dataContext = `Unique words per month: ${JSON.stringify(byMonth)}\nAverage word length: ${avgLen} chars\nTop 15 words: ${topFormatted}\nTotal entries: ${entries.length}\n\nRecent entries for context:\n${formatEntries(entries, 20)}`;
     const narrative = await chat(SYSTEM_PROMPT, dataContext);
-    await sendLong(message, narrative);
+    await sendLong(interaction, narrative);
   },
 };
