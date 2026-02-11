@@ -92,7 +92,9 @@ client.on('interactionCreate', async (interaction) => {
   try {
     await interaction.deferReply();
 
-    const allEntries = await fetchJournalEntries(interaction.channel, client.user.id);
+    // In DMs, interaction.channel can be null — fetch it explicitly
+    const channel = interaction.channel ?? await client.channels.fetch(interaction.channelId);
+    const allEntries = await fetchJournalEntries(channel, client.user.id);
     const entries = filterByTimeframe(allEntries, timeframe);
 
     await cmd.execute(interaction, entries);
