@@ -21,12 +21,11 @@ module.exports = {
     const byDay = entriesByDayOfWeek(entries);
     const byTime = entriesByTimeSlot(entries);
 
-    const [chart1, chart2] = await Promise.all([
-      renderChart(barChart('Entries by Day of Week', Object.keys(byDay), Object.values(byDay))),
-      renderChart(barChart('Entries by Time of Day', Object.keys(byTime), Object.values(byTime), ORANGE)),
-    ]);
+    const chart = await renderChart(
+      barChart('Entries by Day of Week', Object.keys(byDay), Object.values(byDay))
+    );
 
-    await sendCharts(interaction, [chart1, chart2]);
+    await sendCharts(interaction, [chart]);
 
     const dataContext = `Entries by Day of Week: ${JSON.stringify(byDay)}\nEntries by Time of Day: ${JSON.stringify(byTime)}\nTotal entries: ${entries.length}`;
     const narrative = await chat(SYSTEM_PROMPT, dataContext);

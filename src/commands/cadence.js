@@ -23,17 +23,11 @@ module.exports = {
     const streaks = computeStreaks(entries);
     const cumulative = cumulativeEntries(entries);
 
-    const [chart1, chart2] = await Promise.all([
-      renderChart(barChart('Entries Per Month', Object.keys(byMonth), Object.values(byMonth))),
-      renderChart(areaChart(
-        `Cumulative Entries Over Time (${entries.length} total)`,
-        cumulative.map(c => c.date),
-        cumulative.map(c => c.total),
-        TEAL,
-      )),
-    ]);
+    const chart = await renderChart(
+      barChart('Entries Per Month', Object.keys(byMonth), Object.values(byMonth))
+    );
 
-    await sendCharts(interaction, [chart1, chart2]);
+    await sendCharts(interaction, [chart]);
 
     const dataContext = `Entries by month: ${JSON.stringify(byMonth)}\nCurrent streak: ${streaks.current} days\nLongest streak: ${streaks.longest} days\nAvg days between entries: ${streaks.avgGap}\nTotal unique days with entries: ${streaks.totalDays}\nTotal entries: ${entries.length}`;
     const narrative = await chat(SYSTEM_PROMPT, dataContext);
