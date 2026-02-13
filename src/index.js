@@ -21,6 +21,9 @@ for (const file of analysisCommands) {
 const chatCmd = require('./commands/chat');
 commands.set(chatCmd.name, chatCmd);
 
+const { chat: llmChat } = require('./openrouter');
+const { formatEntries, summarizeStats, sendLong } = require('./commands/helpers');
+
 // Build slash command definitions
 function addTimeframeOption(builder) {
   return builder.addStringOption(opt =>
@@ -106,6 +109,42 @@ client.on('interactionCreate', async (interaction) => {
     } else {
       await interaction.reply(errorMsg).catch(() => {});
     }
+  }
+});
+
+// Prefix chat: ! followed by message text
+client.on('messageCreate', async (message) => {
+  if (message.author.bot) return;
+  if (!message.content.startsWith('!')) return;
+
+  const userText = message.content.slice(1).trim();
+  if (!userText) return;
+
+  console.log(`[!chat] ${message.author.username}: ${userText.slice(0, 80)}`);
+
+  try {
+    await message.channel.sendTyping();
+
+    const allEntries = await fetchJournalEntries(message.channel, client.user.id);
+    if (allEntries.length === 0) {
+      await message.reply('No journal entries found yet. Write some entries first, then come back.');
+      return;
+    }
+
+    const stats = summarizeStats(allEntries);
+    const formatted = formatEntries(allEntries);
+    const context = `Context window: all time\nJournal summary: ${stats}\n\nJournal entries:\n\n${formatted}\n\n---\nUser's message: ${userText}`;
+    const reply = await llmChat(chatCmd.SYSTEM_PROMPT, context);
+
+    if (reply.length <= 2000) {
+      await message.reply(reply);
+    } else {
+      await message.reply(reply.slice(0, 2000));
+      await sendLong(message, reply.slice(2000));
+    }
+  } catch (err) {
+    console.error('Prefix chat failed:', err);
+    await message.reply('Something went wrong. Check your OPENROUTER_API_KEY and try again.').catch(() => {});
   }
 });
 

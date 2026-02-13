@@ -16,13 +16,17 @@ async function fetchJournalEntries(channel, botId, limit = 500) {
       if (msg.content.length === 0) continue;
       if (msg.interaction) continue; // skip slash command invocations
 
+      // Strip leading ! so prefix-chat messages read cleanly as journal entries
+      const content = msg.content.startsWith('!') ? msg.content.slice(1).trim() : msg.content;
+      if (content.length === 0) continue;
+
       entries.push({
         author: msg.author.username,
         authorId: msg.author.id,
-        content: msg.content,
+        content,
         timestamp: msg.createdAt,
-        wordCount: msg.content.split(/\s+/).filter(Boolean).length,
-        charCount: msg.content.length,
+        wordCount: content.split(/\s+/).filter(Boolean).length,
+        charCount: content.length,
       });
     }
 

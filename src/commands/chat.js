@@ -19,6 +19,7 @@ Rules:
 Use plain text formatting suitable for Discord.`;
 
 module.exports = {
+  SYSTEM_PROMPT,
   name: 'chat',
   description: 'Talk to your journal — ask questions, get advice, explore ideas.',
   async execute(interaction, entries) {
