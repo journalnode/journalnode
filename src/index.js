@@ -20,6 +20,8 @@ for (const file of analysisCommands) {
 }
 const chatCmd = require('./commands/chat');
 commands.set(chatCmd.name, chatCmd);
+const postfiatCmd = require('./commands/postfiat');
+commands.set(postfiatCmd.name, postfiatCmd);
 
 const { chat: llmChat } = require('./openrouter');
 const { formatEntries, summarizeStats, sendLong } = require('./commands/helpers');
@@ -58,6 +60,12 @@ const chatBuilder = new SlashCommandBuilder()
 addTimeframeOption(chatBuilder);
 slashCommands.push(chatBuilder.toJSON());
 
+// /postfiat: no options needed
+const postfiatBuilder = new SlashCommandBuilder()
+  .setName('postfiat')
+  .setDescription(postfiatCmd.description);
+slashCommands.push(postfiatBuilder.toJSON());
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -75,7 +83,7 @@ client.once('clientReady', async () => {
   try {
     console.log('Registering slash commands...');
     await rest.put(Routes.applicationCommands(client.user.id), { body: slashCommands });
-    const allNames = [...analysisCommands, 'chat'].map(c => `/${c}`).join(', ');
+    const allNames = [...analysisCommands, 'chat', 'postfiat'].map(c => `/${c}`).join(', ');
     console.log(`Registered ${slashCommands.length} slash commands: ${allNames}`);
   } catch (err) {
     console.error('Failed to register slash commands:', err);
@@ -93,6 +101,13 @@ client.on('interactionCreate', async (interaction) => {
   console.log(`[Command] /${interaction.commandName} (${tfLabel}) by ${interaction.user.username}`);
 
   try {
+    // Commands that don't need journal entries (e.g. /postfiat)
+    if (cmd.needsEntries === false) {
+      await interaction.deferReply({ flags: 64 }); // ephemeral — only visible to user
+      await cmd.execute(interaction);
+      return;
+    }
+
     await interaction.deferReply();
 
     // In DMs, interaction.channel can be null — fetch it explicitly
