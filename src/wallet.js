@@ -1,17 +1,29 @@
 const xrpl = require('xrpl');
+const bip39 = require('bip39');
 
 const PFT_TESTNET_WSS = 'wss://rpc.testnet.postfiat.org:6007';
 const PFT_NETWORK_ID = 2025;
 const AIRDROP_AMOUNT = process.env.PFT_AIRDROP_AMOUNT || '50';
 
 /**
- * Generate a new Post Fiat wallet (keypair + address).
+ * Load a wallet from either a 24-word mnemonic or a short seed (sEd...).
+ */
+function loadWallet(seedOrMnemonic) {
+  if (seedOrMnemonic.includes(' ')) {
+    return xrpl.Wallet.fromMnemonic(seedOrMnemonic.trim());
+  }
+  return xrpl.Wallet.fromSeed(seedOrMnemonic.trim());
+}
+
+/**
+ * Generate a new Post Fiat wallet with a 24-word mnemonic seed phrase.
  */
 function generateWallet() {
-  const wallet = xrpl.Wallet.generate();
+  const mnemonic = bip39.generateMnemonic(256);
+  const wallet = xrpl.Wallet.fromMnemonic(mnemonic);
   return {
     address: wallet.classicAddress,
-    seed: wallet.seed,
+    mnemonic,
     publicKey: wallet.publicKey,
   };
 }
@@ -30,7 +42,7 @@ async function airdropToWallet(destinationAddress) {
   await client.connect();
 
   try {
-    const masterWallet = xrpl.Wallet.fromSeed(masterSeed);
+    const masterWallet = loadWallet(masterSeed);
 
     const payment = {
       TransactionType: 'Payment',
@@ -59,4 +71,4 @@ async function airdropToWallet(destinationAddress) {
   }
 }
 
-module.exports = { generateWallet, airdropToWallet, PFT_TESTNET_WSS, PFT_NETWORK_ID };
+module.exports = { generateWallet, airdropToWallet, loadWallet, PFT_TESTNET_WSS, PFT_NETWORK_ID };
