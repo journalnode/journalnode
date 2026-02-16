@@ -1,7 +1,7 @@
 const xrpl = require('xrpl');
 const bip39 = require('bip39');
 
-const PFT_TESTNET_WSS = 'wss://rpc.testnet.postfiat.org';
+const PFT_TESTNET_WSS = 'wss://ws.testnet.postfiat.org';
 const PFT_NETWORK_ID = 2025;
 const AIRDROP_AMOUNT = process.env.PFT_AIRDROP_AMOUNT || '50';
 
