@@ -44,7 +44,7 @@ module.exports = {
       let airdropMsg = '';
       try {
         const airdrop = await airdropToWallet(wallet.address);
-        airdropMsg = `**Airdrop:** ${airdrop.amount} PFT sent from the Master Node\n**Transaction:** \`${airdrop.txHash}\`\n`;
+        airdropMsg = `**Airdrop:** ${airdrop.amount} PFT sent from the Master Node — [View Transaction](https://explorer.testnet.postfiat.org/tx/${airdrop.txHash})\n`;
         console.log(`[/wallets create] Airdrop success — tx: ${airdrop.txHash}`);
       } catch (err) {
         airdropMsg = `Airdrop failed: ${err.message} — the wallet can be funded manually.\n`;
