@@ -22,8 +22,7 @@ module.exports = {
 
       const lines = user.wallets.map((w, i) => {
         const active = w.address === user.activeAddress ? ' **[active]**' : '';
-        const short = w.address.slice(0, 8) + '...' + w.address.slice(-6);
-        return `${i + 1}. \`${short}\`${active}`;
+        return `${i + 1}. \`${w.address}\`${active}`;
       });
 
       await interaction.editReply(
