@@ -22,6 +22,8 @@ const chatCmd = require('./commands/chat');
 commands.set(chatCmd.name, chatCmd);
 const postfiatCmd = require('./commands/postfiat');
 commands.set(postfiatCmd.name, postfiatCmd);
+const walletsCmd = require('./commands/wallets');
+commands.set(walletsCmd.name, walletsCmd);
 
 const { chat: llmChat } = require('./openrouter');
 const { formatEntries, summarizeStats, sendLong } = require('./commands/helpers');
@@ -66,6 +68,39 @@ const postfiatBuilder = new SlashCommandBuilder()
   .setDescription(postfiatCmd.description);
 slashCommands.push(postfiatBuilder.toJSON());
 
+// /wallets: subcommands for wallet management
+const walletsBuilder = new SlashCommandBuilder()
+  .setName('wallets')
+  .setDescription(walletsCmd.description)
+  .addSubcommand(sub => sub
+    .setName('list')
+    .setDescription('View all your saved wallets.'))
+  .addSubcommand(sub => sub
+    .setName('create')
+    .setDescription('Generate a new wallet and save it.'))
+  .addSubcommand(sub => sub
+    .setName('import')
+    .setDescription('Import an existing wallet with a seed phrase or private key.')
+    .addStringOption(opt => opt
+      .setName('seed')
+      .setDescription('Your 24-word seed phrase or private key')
+      .setRequired(true)))
+  .addSubcommand(sub => sub
+    .setName('delete')
+    .setDescription('Remove a wallet from your profile.')
+    .addStringOption(opt => opt
+      .setName('address')
+      .setDescription('The wallet address to remove')
+      .setRequired(true)))
+  .addSubcommand(sub => sub
+    .setName('set-active')
+    .setDescription('Set which wallet is your active wallet.')
+    .addStringOption(opt => opt
+      .setName('address')
+      .setDescription('The wallet address to set as active')
+      .setRequired(true)));
+slashCommands.push(walletsBuilder.toJSON());
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -83,7 +118,7 @@ client.once('clientReady', async () => {
   try {
     console.log('Registering slash commands...');
     await rest.put(Routes.applicationCommands(client.user.id), { body: slashCommands });
-    const allNames = [...analysisCommands, 'chat', 'postfiat'].map(c => `/${c}`).join(', ');
+    const allNames = [...analysisCommands, 'chat', 'postfiat', 'wallets'].map(c => `/${c}`).join(', ');
     console.log(`Registered ${slashCommands.length} slash commands: ${allNames}`);
   } catch (err) {
     console.error('Failed to register slash commands:', err);
