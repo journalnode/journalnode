@@ -71,4 +71,53 @@ async function airdropToWallet(destinationAddress) {
   }
 }
 
-module.exports = { generateWallet, airdropToWallet, loadWallet, PFT_TESTNET_WSS, PFT_NETWORK_ID };
+/**
+ * Send PFT from a user's wallet to a destination address.
+ * Optionally attaches a memo (hex-encoded) to the transaction.
+ */
+async function sendPFT(senderSeed, destinationAddress, amount, memo) {
+  const client = new xrpl.Client(PFT_TESTNET_WSS);
+  await client.connect();
+
+  try {
+    const senderWallet = loadWallet(senderSeed);
+
+    const payment = {
+      TransactionType: 'Payment',
+      Account: senderWallet.classicAddress,
+      Destination: destinationAddress,
+      Amount: xrpl.xrpToDrops(amount),
+      NetworkID: PFT_NETWORK_ID,
+    };
+
+    if (memo) {
+      payment.Memos = [{
+        Memo: {
+          MemoData: Buffer.from(memo, 'utf8').toString('hex').toUpperCase(),
+          MemoType: Buffer.from('text/plain', 'utf8').toString('hex').toUpperCase(),
+        },
+      }];
+    }
+
+    const prepared = await client.autofill(payment);
+    const signed = senderWallet.sign(prepared);
+    const result = await client.submitAndWait(signed.tx_blob);
+
+    const txResult = result.result.meta.TransactionResult;
+    if (txResult !== 'tesSUCCESS') {
+      throw new Error(`Transaction failed: ${txResult}`);
+    }
+
+    return {
+      txHash: signed.hash,
+      from: senderWallet.classicAddress,
+      to: destinationAddress,
+      amount,
+      memo: memo || null,
+    };
+  } finally {
+    await client.disconnect();
+  }
+}
+
+module.exports = { generateWallet, airdropToWallet, sendPFT, loadWallet, PFT_TESTNET_WSS, PFT_NETWORK_ID };

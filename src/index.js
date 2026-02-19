@@ -24,6 +24,8 @@ const postfiatCmd = require('./commands/postfiat');
 commands.set(postfiatCmd.name, postfiatCmd);
 const walletsCmd = require('./commands/wallets');
 commands.set(walletsCmd.name, walletsCmd);
+const sendCmd = require('./commands/send');
+commands.set(sendCmd.name, sendCmd);
 
 const { chat: llmChat } = require('./openrouter');
 const { formatEntries, summarizeStats, sendLong } = require('./commands/helpers');
@@ -101,6 +103,24 @@ const walletsBuilder = new SlashCommandBuilder()
       .setRequired(true)));
 slashCommands.push(walletsBuilder.toJSON());
 
+// /send: destination (required), amount (required), memo (optional)
+const sendBuilder = new SlashCommandBuilder()
+  .setName('send')
+  .setDescription(sendCmd.description)
+  .addStringOption(opt => opt
+    .setName('destination')
+    .setDescription('The wallet address to send PFT to')
+    .setRequired(true))
+  .addStringOption(opt => opt
+    .setName('amount')
+    .setDescription('Amount of PFT to send')
+    .setRequired(true))
+  .addStringOption(opt => opt
+    .setName('memo')
+    .setDescription('Optional memo to attach on-chain')
+    .setRequired(false));
+slashCommands.push(sendBuilder.toJSON());
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -118,7 +138,7 @@ client.once('clientReady', async () => {
   try {
     console.log('Registering slash commands...');
     await rest.put(Routes.applicationCommands(client.user.id), { body: slashCommands });
-    const allNames = [...analysisCommands, 'chat', 'postfiat', 'wallets'].map(c => `/${c}`).join(', ');
+    const allNames = [...analysisCommands, 'chat', 'postfiat', 'wallets', 'send'].map(c => `/${c}`).join(', ');
     console.log(`Registered ${slashCommands.length} slash commands: ${allNames}`);
   } catch (err) {
     console.error('Failed to register slash commands:', err);
