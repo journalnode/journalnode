@@ -120,4 +120,29 @@ async function sendPFT(senderSeed, destinationAddress, amount, memo) {
   }
 }
 
-module.exports = { generateWallet, airdropToWallet, sendPFT, loadWallet, PFT_TESTNET_WSS, PFT_NETWORK_ID };
+/**
+ * Query the PFT balance for an address. Returns balance in PFT (not drops).
+ * Returns null if the account is not found / not activated.
+ */
+async function getBalance(address) {
+  const client = new xrpl.Client(PFT_TESTNET_WSS);
+  await client.connect();
+
+  try {
+    const response = await client.request({
+      command: 'account_info',
+      account: address,
+      ledger_index: 'validated',
+    });
+    return xrpl.dropsToXrp(response.result.account_data.Balance);
+  } catch (err) {
+    if (err.data && err.data.error === 'actNotFound') {
+      return null;
+    }
+    throw err;
+  } finally {
+    await client.disconnect();
+  }
+}
+
+module.exports = { generateWallet, airdropToWallet, sendPFT, getBalance, loadWallet, PFT_TESTNET_WSS, PFT_NETWORK_ID };
