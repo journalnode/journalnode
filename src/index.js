@@ -28,6 +28,8 @@ const sendCmd = require('./commands/send');
 commands.set(sendCmd.name, sendCmd);
 const balanceCmd = require('./commands/balance');
 commands.set(balanceCmd.name, balanceCmd);
+const mintCmd = require('./commands/mint');
+commands.set(mintCmd.name, mintCmd);
 
 const { chat: llmChat } = require('./openrouter');
 const { formatEntries, summarizeStats, sendLong } = require('./commands/helpers');
@@ -129,6 +131,20 @@ const balanceBuilder = new SlashCommandBuilder()
   .setDescription(balanceCmd.description);
 slashCommands.push(balanceBuilder.toJSON());
 
+// /mint: uri (optional string) + image (optional attachment)
+const mintBuilder = new SlashCommandBuilder()
+  .setName('mint')
+  .setDescription(mintCmd.description)
+  .addStringOption(opt => opt
+    .setName('uri')
+    .setDescription('IPFS URI (e.g. ipfs://bafkrei...)')
+    .setRequired(false))
+  .addAttachmentOption(opt => opt
+    .setName('image')
+    .setDescription('Upload a .jpg or .png to mint as an NFT')
+    .setRequired(false));
+slashCommands.push(mintBuilder.toJSON());
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -146,7 +162,7 @@ client.once('clientReady', async () => {
   try {
     console.log('Registering slash commands...');
     await rest.put(Routes.applicationCommands(client.user.id), { body: slashCommands });
-    const allNames = [...analysisCommands, 'chat', 'postfiat', 'wallets', 'send', 'balance'].map(c => `/${c}`).join(', ');
+    const allNames = [...analysisCommands, 'chat', 'postfiat', 'wallets', 'send', 'balance', 'mint'].map(c => `/${c}`).join(', ');
     console.log(`Registered ${slashCommands.length} slash commands: ${allNames}`);
   } catch (err) {
     console.error('Failed to register slash commands:', err);

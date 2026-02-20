@@ -145,4 +145,79 @@ async function getBalance(address) {
   }
 }
 
-module.exports = { generateWallet, airdropToWallet, sendPFT, getBalance, loadWallet, PFT_TESTNET_WSS, PFT_NETWORK_ID };
+/**
+ * Mint an NFT on the Post Fiat testnet.
+ * URI is a string (e.g. "ipfs://bafkrei...") that gets hex-encoded.
+ * Flags 9 = tfBurnable (1) + tfTransferable (8), matching network convention.
+ */
+async function mintNFT(ownerSeed, uri) {
+  const client = new xrpl.Client(PFT_TESTNET_WSS);
+  await client.connect();
+
+  try {
+    const wallet = loadWallet(ownerSeed);
+
+    const tx = {
+      TransactionType: 'NFTokenMint',
+      Account: wallet.classicAddress,
+      NFTokenTaxon: 0,
+      Flags: 9,
+      TransferFee: 0,
+      URI: Buffer.from(uri, 'utf8').toString('hex').toUpperCase(),
+      NetworkID: PFT_NETWORK_ID,
+    };
+
+    const prepared = await client.autofill(tx);
+    const signed = wallet.sign(prepared);
+    const result = await client.submitAndWait(signed.tx_blob);
+
+    const txResult = result.result.meta.TransactionResult;
+    if (txResult !== 'tesSUCCESS') {
+      throw new Error(`Transaction failed: ${txResult}`);
+    }
+
+    const nftokenId = result.result.meta.nftoken_id || null;
+
+    return {
+      txHash: signed.hash,
+      nftokenId,
+      uri,
+      minter: wallet.classicAddress,
+    };
+  } finally {
+    await client.disconnect();
+  }
+}
+
+/**
+ * Upload a file buffer to IPFS via Pinata. Returns the IPFS URI.
+ * Requires PINATA_JWT env var.
+ */
+async function uploadToIPFS(buffer, filename) {
+  const jwt = process.env.PINATA_JWT;
+  if (!jwt) {
+    throw new Error('PINATA_JWT is not set. Add your Pinata API JWT to the .env file, or provide an IPFS URI directly.');
+  }
+
+  const FormData = (await import('formdata-node')).FormData;
+  const { Blob } = (await import('formdata-node'));
+
+  const form = new FormData();
+  form.append('file', new Blob([buffer]), filename);
+
+  const response = await fetch('https://api.pinata.cloud/pinning/pinFileToIPFS', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${jwt}` },
+    body: form,
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Pinata upload failed: ${text}`);
+  }
+
+  const data = await response.json();
+  return `ipfs://${data.IpfsHash}`;
+}
+
+module.exports = { generateWallet, airdropToWallet, sendPFT, getBalance, mintNFT, uploadToIPFS, loadWallet, PFT_TESTNET_WSS, PFT_NETWORK_ID };
