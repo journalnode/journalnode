@@ -83,6 +83,12 @@ module.exports = {
 
       lines.push(`**Transaction Link:** https://explorer.testnet.postfiat.org/transactions/${result.txHash}`);
 
+      // Add viewable image link if URI is an IPFS URI
+      if (result.uri.startsWith('ipfs://')) {
+        const cid = result.uri.replace('ipfs://', '');
+        lines.push(`**View Image:** https://ipfs.io/ipfs/${cid}`);
+      }
+
       await interaction.editReply(lines.join('\n'));
     } catch (err) {
       console.error(`[/mint] Failed:`, err.message);
