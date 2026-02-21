@@ -2,6 +2,7 @@ const { getNFTs } = require('../wallet');
 const { getActiveWallet, getUserWallets } = require('../walletStore');
 
 const IPFS_GATEWAY = 'https://ipfs.io/ipfs/';
+const EXPLORER = 'https://explorer.testnet.postfiat.org';
 const PAGE_SIZE = 10;
 
 module.exports = {
@@ -38,6 +39,7 @@ module.exports = {
     pageNfts.forEach((nft, i) => {
       const num = start + i + 1;
       lines.push(`**${num}.** \`${nft.nftokenId}\``);
+      lines.push(`Explorer: ${EXPLORER}/nft/${nft.nftokenId}`);
 
       if (nft.uri && nft.uri.includes('ipfs://')) {
         const cid = nft.uri.split('ipfs://').pop();
