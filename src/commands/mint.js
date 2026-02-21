@@ -82,6 +82,9 @@ module.exports = {
       }
 
       lines.push(`**Transaction Link:** https://explorer.testnet.postfiat.org/transactions/${result.txHash}`);
+      if (result.nftokenId) {
+        lines.push(`**View on Jollydinger's NFT Library:** https://jollydinger.com/nft-detail.html?id=${result.nftokenId}`);
+      }
 
       // Add viewable image link if URI is an IPFS URI
       if (result.uri.includes('ipfs://')) {

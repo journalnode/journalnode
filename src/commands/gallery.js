@@ -3,6 +3,7 @@ const { getActiveWallet, getUserWallets } = require('../walletStore');
 
 const IPFS_GATEWAY = 'https://ipfs.io/ipfs/';
 const EXPLORER = 'https://explorer.testnet.postfiat.org';
+const JOLLYDINGER = 'https://jollydinger.com/nft-detail.html?id=';
 const PAGE_SIZE = 10;
 
 module.exports = {
@@ -42,6 +43,8 @@ module.exports = {
       if (nft.mintTxHash) {
         lines.push(`Mint Tx: ${EXPLORER}/transactions/${nft.mintTxHash}`);
       }
+
+      lines.push(`View on Jollydinger's NFT Library: ${JOLLYDINGER}${nft.nftokenId}`);
 
       if (nft.uri && nft.uri.includes('ipfs://')) {
         const cid = nft.uri.split('ipfs://').pop();
