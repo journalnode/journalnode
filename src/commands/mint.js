@@ -84,8 +84,8 @@ module.exports = {
       lines.push(`**Transaction Link:** https://explorer.testnet.postfiat.org/transactions/${result.txHash}`);
 
       // Add viewable image link if URI is an IPFS URI
-      if (result.uri.startsWith('ipfs://')) {
-        const cid = result.uri.replace('ipfs://', '');
+      if (result.uri.includes('ipfs://')) {
+        const cid = result.uri.split('ipfs://').pop();
         lines.push(`**View Image:** https://ipfs.io/ipfs/${cid}`);
       }
 

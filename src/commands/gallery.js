@@ -39,8 +39,8 @@ module.exports = {
       const num = start + i + 1;
       lines.push(`**${num}.** \`${nft.nftokenId}\``);
 
-      if (nft.uri && nft.uri.startsWith('ipfs://')) {
-        const cid = nft.uri.replace('ipfs://', '');
+      if (nft.uri && nft.uri.includes('ipfs://')) {
+        const cid = nft.uri.split('ipfs://').pop();
         lines.push(`View: ${IPFS_GATEWAY}${cid}`);
       } else if (nft.uri) {
         lines.push(`URI: ${nft.uri}`);
