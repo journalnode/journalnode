@@ -251,15 +251,19 @@ async function getNFTs(address) {
       });
 
       const mintTxMap = new Map();
-      for (const tx of (txResponse.result.transactions || [])) {
-        const txData = tx.tx || tx.tx_json;
-        if (txData && txData.TransactionType === 'NFTokenMint') {
-          const nftokenId = tx.meta?.nftoken_id || null;
-          if (nftokenId) {
-            mintTxMap.set(nftokenId, txData.hash);
+      for (const entry of (txResponse.result.transactions || [])) {
+        const txData = entry.tx || entry.tx_json || {};
+        const meta = entry.meta || entry.meta_blob || txData.meta || {};
+        if (txData.TransactionType === 'NFTokenMint') {
+          const nftokenId = meta.nftoken_id || meta.NFTokenID || null;
+          const hash = entry.hash || txData.hash || null;
+          console.log(`[getNFTs] Found NFTokenMint — hash: ${hash}, nftoken_id: ${nftokenId}, meta keys: ${Object.keys(meta).join(',')}`);
+          if (nftokenId && hash) {
+            mintTxMap.set(nftokenId, hash);
           }
         }
       }
+      console.log(`[getNFTs] Matched ${mintTxMap.size} mint txs out of ${txResponse.result.transactions?.length || 0} total txs`);
 
       for (const nft of nfts) {
         if (mintTxMap.has(nft.nftokenId)) {
