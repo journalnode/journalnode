@@ -235,10 +235,42 @@ async function getNFTs(address) {
       ledger_index: 'validated',
     });
 
-    return (response.result.account_nfts || []).map(nft => ({
+    const nfts = (response.result.account_nfts || []).map(nft => ({
       nftokenId: nft.NFTokenID,
       uri: nft.URI ? Buffer.from(nft.URI, 'hex').toString('utf8') : null,
+      mintTxHash: null,
     }));
+
+    // Fetch account transactions to find mint tx hashes
+    try {
+      const txResponse = await client.request({
+        command: 'account_tx',
+        account: address,
+        ledger_index_min: -1,
+        ledger_index_max: -1,
+      });
+
+      const mintTxMap = new Map();
+      for (const tx of (txResponse.result.transactions || [])) {
+        const txData = tx.tx || tx.tx_json;
+        if (txData && txData.TransactionType === 'NFTokenMint') {
+          const nftokenId = tx.meta?.nftoken_id || null;
+          if (nftokenId) {
+            mintTxMap.set(nftokenId, txData.hash);
+          }
+        }
+      }
+
+      for (const nft of nfts) {
+        if (mintTxMap.has(nft.nftokenId)) {
+          nft.mintTxHash = mintTxMap.get(nft.nftokenId);
+        }
+      }
+    } catch (txErr) {
+      console.error('[getNFTs] Could not fetch mint tx history:', txErr.message);
+    }
+
+    return nfts;
   } catch (err) {
     if (err.data && err.data.error === 'actNotFound') {
       return [];

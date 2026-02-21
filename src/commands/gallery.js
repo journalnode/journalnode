@@ -39,7 +39,9 @@ module.exports = {
     pageNfts.forEach((nft, i) => {
       const num = start + i + 1;
       lines.push(`**${num}.** \`${nft.nftokenId}\``);
-      lines.push(`Explorer: ${EXPLORER}/nft/${nft.nftokenId}`);
+      if (nft.mintTxHash) {
+        lines.push(`Mint Tx: ${EXPLORER}/transactions/${nft.mintTxHash}`);
+      }
 
       if (nft.uri && nft.uri.includes('ipfs://')) {
         const cid = nft.uri.split('ipfs://').pop();
