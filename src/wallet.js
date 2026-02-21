@@ -220,4 +220,33 @@ async function uploadToIPFS(buffer, filename) {
   return `ipfs://${data.IpfsHash}`;
 }
 
-module.exports = { generateWallet, airdropToWallet, sendPFT, getBalance, mintNFT, uploadToIPFS, loadWallet, PFT_TESTNET_WSS, PFT_NETWORK_ID };
+/**
+ * Fetch all NFTs owned by an address.
+ * Returns array of { nftokenId, uri } with URI decoded from hex.
+ */
+async function getNFTs(address) {
+  const client = new xrpl.Client(PFT_TESTNET_WSS);
+  await client.connect();
+
+  try {
+    const response = await client.request({
+      command: 'account_nfts',
+      account: address,
+      ledger_index: 'validated',
+    });
+
+    return (response.result.account_nfts || []).map(nft => ({
+      nftokenId: nft.NFTokenID,
+      uri: nft.URI ? Buffer.from(nft.URI, 'hex').toString('utf8') : null,
+    }));
+  } catch (err) {
+    if (err.data && err.data.error === 'actNotFound') {
+      return [];
+    }
+    throw err;
+  } finally {
+    await client.disconnect();
+  }
+}
+
+module.exports = { generateWallet, airdropToWallet, sendPFT, getBalance, mintNFT, uploadToIPFS, getNFTs, loadWallet, PFT_TESTNET_WSS, PFT_NETWORK_ID };
