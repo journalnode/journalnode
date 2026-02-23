@@ -229,7 +229,12 @@ client.on('interactionCreate', async (interaction) => {
   try {
     // Modal commands — show modal instead of deferring
     if (cmd.isModal) {
-      await cmd.showModal(interaction);
+      try {
+        await cmd.showModal(interaction);
+      } catch (modalErr) {
+        console.error(`[Modal] /${interaction.commandName} showModal failed:`, modalErr);
+        await interaction.reply({ content: 'Failed to open the form. Please try again.', flags: 64 }).catch(() => {});
+      }
       return;
     }
 

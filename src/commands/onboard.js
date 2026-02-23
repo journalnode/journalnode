@@ -22,7 +22,7 @@ module.exports = {
 
     const purposeInput = new TextInputBuilder()
       .setCustomId('purpose')
-      .setLabel('What is the purpose or goal of your journal?')
+      .setLabel('Purpose or goal of your journal?')
       .setStyle(TextInputStyle.Paragraph)
       .setPlaceholder(
         'This can be anything — a specific goal like "track my fitness journey" ' +
