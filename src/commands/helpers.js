@@ -1,4 +1,11 @@
 const { AttachmentBuilder } = require('discord.js');
+const { getUserPurpose } = require('../onboardStore');
+
+function purposeContext(userId) {
+  const data = getUserPurpose(userId);
+  if (!data) return '';
+  return `\n\nThe user's stated journal purpose/goal: "${data.purpose}"\nKeep this goal in mind when analyzing their entries — reference their progress toward it when relevant.`;
+}
 
 function formatEntries(entries, limit = 50) {
   const subset = entries.length > limit ? entries.slice(-limit) : entries;
@@ -49,4 +56,4 @@ async function sendCharts(interaction, chartBuffers) {
   await interaction.editReply({ files });
 }
 
-module.exports = { formatEntries, summarizeStats, sendLong, sendCharts };
+module.exports = { formatEntries, summarizeStats, sendLong, sendCharts, purposeContext };

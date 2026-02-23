@@ -1,5 +1,5 @@
 const { chat } = require('../openrouter');
-const { formatEntries, summarizeStats, sendLong } = require('./helpers');
+const { formatEntries, summarizeStats, sendLong, purposeContext } = require('./helpers');
 
 const SYSTEM_PROMPT = `You are Journal Node, an AI that lives inside the user's journal. The user is asking for a general insight — a holistic read of their journal.
 
@@ -20,7 +20,8 @@ module.exports = {
     }
     const stats = summarizeStats(entries);
     const formatted = formatEntries(entries);
-    const userMsg = `Here is a summary of the journal:\n${stats}\n\nHere are the journal entries:\n\n${formatted}`;
+    const purpose = purposeContext(interaction.user.id);
+    const userMsg = `Here is a summary of the journal:\n${stats}${purpose}\n\nHere are the journal entries:\n\n${formatted}`;
     const reply = await chat(SYSTEM_PROMPT, userMsg);
     await interaction.editReply(reply.slice(0, 2000));
     if (reply.length > 2000) await sendLong(interaction, reply.slice(2000));

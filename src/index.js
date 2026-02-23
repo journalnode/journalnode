@@ -34,9 +34,12 @@ const galleryCmd = require('./commands/gallery');
 commands.set(galleryCmd.name, galleryCmd);
 const receiveCmd = require('./commands/receive');
 commands.set(receiveCmd.name, receiveCmd);
+const onboardCmd = require('./commands/onboard');
+commands.set(onboardCmd.name, onboardCmd);
 
 const { chat: llmChat } = require('./openrouter');
 const { formatEntries, summarizeStats, sendLong } = require('./commands/helpers');
+const { getUserPurpose } = require('./onboardStore');
 
 // Build slash command definitions
 function addTimeframeOption(builder) {
@@ -165,6 +168,12 @@ const receiveBuilder = new SlashCommandBuilder()
   .setDescription(receiveCmd.description);
 slashCommands.push(receiveBuilder.toJSON());
 
+// /onboard: no options — opens a modal
+const onboardBuilder = new SlashCommandBuilder()
+  .setName('onboard')
+  .setDescription(onboardCmd.description);
+slashCommands.push(onboardBuilder.toJSON());
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -182,7 +191,7 @@ client.once('clientReady', async () => {
   try {
     console.log('Registering slash commands...');
     await rest.put(Routes.applicationCommands(client.user.id), { body: slashCommands });
-    const allNames = [...analysisCommands, 'chat', 'postfiat', 'wallets', 'send', 'balance', 'mint', 'gallery', 'receive'].map(c => `/${c}`).join(', ');
+    const allNames = [...analysisCommands, 'chat', 'postfiat', 'wallets', 'send', 'balance', 'mint', 'gallery', 'receive', 'onboard'].map(c => `/${c}`).join(', ');
     console.log(`Registered ${slashCommands.length} slash commands: ${allNames}`);
   } catch (err) {
     console.error('Failed to register slash commands:', err);
@@ -190,6 +199,24 @@ client.once('clientReady', async () => {
 });
 
 client.on('interactionCreate', async (interaction) => {
+  // Handle modal submissions
+  if (interaction.isModalSubmit()) {
+    if (interaction.customId === 'onboard_modal') {
+      try {
+        await onboardCmd.handleSubmit(interaction);
+      } catch (err) {
+        console.error('[/onboard] Modal submit failed:', err);
+        const errorMsg = 'Something went wrong processing your onboarding. Please try again.';
+        if (interaction.deferred || interaction.replied) {
+          await interaction.followUp(errorMsg).catch(() => {});
+        } else {
+          await interaction.reply({ content: errorMsg, flags: 64 }).catch(() => {});
+        }
+      }
+    }
+    return;
+  }
+
   if (!interaction.isChatInputCommand()) return;
 
   const cmd = commands.get(interaction.commandName);
@@ -200,6 +227,12 @@ client.on('interactionCreate', async (interaction) => {
   console.log(`[Command] /${interaction.commandName} (${tfLabel}) by ${interaction.user.username}`);
 
   try {
+    // Modal commands — show modal instead of deferring
+    if (cmd.isModal) {
+      await cmd.showModal(interaction);
+      return;
+    }
+
     // Commands that don't need journal entries (e.g. /postfiat)
     if (cmd.needsEntries === false) {
       await interaction.deferReply({ flags: 64 }); // ephemeral — only visible to user
@@ -247,7 +280,9 @@ client.on('messageCreate', async (message) => {
 
     const stats = summarizeStats(allEntries);
     const formatted = formatEntries(allEntries);
-    const context = `Context window: all time\nJournal summary: ${stats}\n\nJournal entries:\n\n${formatted}\n\n---\nUser's message: ${userText}`;
+    const purposeData = getUserPurpose(message.author.id);
+    const purposeStr = purposeData ? `\n\nThe user's stated journal purpose/goal: "${purposeData.purpose}"\nKeep this goal in mind when analyzing their entries — reference their progress toward it when relevant.` : '';
+    const context = `Context window: all time\nJournal summary: ${stats}${purposeStr}\n\nJournal entries:\n\n${formatted}\n\n---\nUser's message: ${userText}`;
     const reply = await llmChat(chatCmd.SYSTEM_PROMPT, context);
 
     if (reply.length <= 2000) {

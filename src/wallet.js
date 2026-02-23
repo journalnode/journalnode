@@ -32,7 +32,7 @@ function generateWallet() {
  * Send PFT from the master wallet to a new address to activate it on-chain.
  * Returns the transaction hash on success.
  */
-async function airdropToWallet(destinationAddress) {
+async function airdropToWallet(destinationAddress, amount, memo) {
   const masterSeed = process.env.PFT_MASTER_SEED;
   if (!masterSeed) {
     throw new Error('PFT_MASTER_SEED is not set in environment variables.');
@@ -43,14 +43,24 @@ async function airdropToWallet(destinationAddress) {
 
   try {
     const masterWallet = loadWallet(masterSeed);
+    const sendAmount = amount || AIRDROP_AMOUNT;
 
     const payment = {
       TransactionType: 'Payment',
       Account: masterWallet.classicAddress,
       Destination: destinationAddress,
-      Amount: xrpl.xrpToDrops(AIRDROP_AMOUNT),
+      Amount: xrpl.xrpToDrops(sendAmount),
       NetworkID: PFT_NETWORK_ID,
     };
+
+    if (memo) {
+      payment.Memos = [{
+        Memo: {
+          MemoData: Buffer.from(memo, 'utf8').toString('hex').toUpperCase(),
+          MemoType: Buffer.from('text/plain', 'utf8').toString('hex').toUpperCase(),
+        },
+      }];
+    }
 
     const prepared = await client.autofill(payment);
     const signed = masterWallet.sign(prepared);
@@ -63,7 +73,7 @@ async function airdropToWallet(destinationAddress) {
 
     return {
       txHash: signed.hash,
-      amount: AIRDROP_AMOUNT,
+      amount: sendAmount,
       masterAddress: masterWallet.classicAddress,
     };
   } finally {
