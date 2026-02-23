@@ -24,10 +24,7 @@ module.exports = {
       .setCustomId('purpose')
       .setLabel('Purpose or goal of your journal?')
       .setStyle(TextInputStyle.Paragraph)
-      .setPlaceholder(
-        'This can be anything — a specific goal like "track my fitness journey" ' +
-        'or something broad like "I\'m just curious" or "I want a place to write down my thoughts."'
-      )
+      .setPlaceholder('e.g. Track my fitness journey, write down my thoughts...')
       .setRequired(true)
       .setMaxLength(1000);
 

@@ -222,9 +222,7 @@ client.on('interactionCreate', async (interaction) => {
   const cmd = commands.get(interaction.commandName);
   if (!cmd) return;
 
-  const timeframe = interaction.options.getString('timeframe');
-  const tfLabel = timeframeLabel(timeframe);
-  console.log(`[Command] /${interaction.commandName} (${tfLabel}) by ${interaction.user.username}`);
+  console.log(`[Command] /${interaction.commandName} by ${interaction.user.username}`);
 
   try {
     // Modal commands — show modal instead of deferring
@@ -237,6 +235,8 @@ client.on('interactionCreate', async (interaction) => {
       }
       return;
     }
+
+    const timeframe = interaction.options.getString('timeframe');
 
     // Commands that don't need journal entries (e.g. /postfiat)
     if (cmd.needsEntries === false) {
