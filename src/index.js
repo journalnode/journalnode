@@ -40,6 +40,8 @@ const tradeCmd = require('./commands/trade');
 commands.set(tradeCmd.name, tradeCmd);
 const menuCmd = require('./commands/menu');
 commands.set(menuCmd.name, menuCmd);
+const analyzeCmd = require('./commands/analyze');
+commands.set(analyzeCmd.name, analyzeCmd);
 
 const { chat: llmChat } = require('./openrouter');
 const { formatEntries, summarizeStats, sendLong } = require('./commands/helpers');
@@ -202,6 +204,44 @@ const menuBuilder = new SlashCommandBuilder()
   .setDescription(menuCmd.description);
 slashCommands.push(menuBuilder.toJSON());
 
+// /analyze: 4 subcommands for LLM market analysis
+const { MODELS } = require('./models');
+const analyzeBuilder = new SlashCommandBuilder()
+  .setName('analyze')
+  .setDescription(analyzeCmd.description)
+  .addSubcommand(sub => sub
+    .setName('bullish')
+    .setDescription('All 18 models vote bullish or bearish on an asset.')
+    .addStringOption(opt => opt.setName('asset').setDescription('Asset to analyze (e.g. BTC, ETH, AAPL)').setRequired(true))
+    .addStringOption(opt => opt.setName('horizon').setDescription('Time horizon (e.g. 3 months, 1 year, EOY 2026)').setRequired(true)))
+  .addSubcommand(sub => sub
+    .setName('multival')
+    .setDescription('Up to 8 models estimate market cap at a target date.')
+    .addStringOption(opt => opt.setName('asset').setDescription('Asset to value (e.g. BTC, ETH, AAPL)').setRequired(true))
+    .addStringOption(opt => opt.setName('target').setDescription('Target quarter/year (e.g. Q3 2026, EOY 2027)').setRequired(true)))
+  .addSubcommand(sub => {
+    sub.setName('soloval')
+      .setDescription('One model runs multiple valuations — shows distribution.')
+      .addStringOption(opt => opt.setName('asset').setDescription('Asset to value (e.g. BTC, ETH, AAPL)').setRequired(true))
+      .addStringOption(opt => opt.setName('target').setDescription('Target quarter/year (e.g. Q3 2026, EOY 2027)').setRequired(true))
+      .addIntegerOption(opt => opt.setName('runs').setDescription('Number of runs (1-5, default 3)').setRequired(false).setMinValue(1).setMaxValue(5));
+    const modelOpt = opt => {
+      opt.setName('model').setDescription('LLM model to use').setRequired(true);
+      for (const m of MODELS) {
+        opt.addChoices({ name: m.name, value: m.id });
+      }
+      return opt;
+    };
+    sub.addStringOption(modelOpt);
+    return sub;
+  })
+  .addSubcommand(sub => sub
+    .setName('technical')
+    .setDescription('Up to 8 models analyze a chart screenshot — long or short.')
+    .addStringOption(opt => opt.setName('timeframe').setDescription('Chart timeframe (e.g. 4H, Daily, 1W)').setRequired(true))
+    .addAttachmentOption(opt => opt.setName('screenshot').setDescription('Candlestick chart screenshot').setRequired(true)));
+slashCommands.push(analyzeBuilder.toJSON());
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -219,7 +259,7 @@ client.once('clientReady', async () => {
   try {
     console.log('Registering slash commands...');
     await rest.put(Routes.applicationCommands(client.user.id), { body: slashCommands });
-    const allNames = [...analysisCommands, 'chat', 'postfiat', 'wallets', 'send', 'balance', 'mint', 'gallery', 'receive', 'onboard', 'trade', 'menu'].map(c => `/${c}`).join(', ');
+    const allNames = [...analysisCommands, 'chat', 'postfiat', 'wallets', 'send', 'balance', 'mint', 'gallery', 'receive', 'onboard', 'trade', 'menu', 'analyze'].map(c => `/${c}`).join(', ');
     console.log(`Registered ${slashCommands.length} slash commands: ${allNames}`);
   } catch (err) {
     console.error('Failed to register slash commands:', err);
@@ -249,6 +289,24 @@ client.on('interactionCreate', async (interaction) => {
         const errorMsg = 'Something went wrong logging your trade. Please try again.';
         if (interaction.deferred || interaction.replied) {
           await interaction.followUp(errorMsg).catch(() => {});
+        } else {
+          await interaction.reply({ content: errorMsg, flags: 64 }).catch(() => {});
+        }
+      }
+    }
+    return;
+  }
+
+  // Handle StringSelectMenu interactions (model selection for /analyze)
+  if (interaction.isStringSelectMenu()) {
+    if (interaction.customId === 'analyze_model_select') {
+      try {
+        await analyzeCmd.handleSelectMenu(interaction);
+      } catch (err) {
+        console.error('[/analyze] Model select failed:', err);
+        const errorMsg = 'Something went wrong processing your model selection. Please try `/analyze` again.';
+        if (interaction.deferred || interaction.replied) {
+          await interaction.followUp({ content: errorMsg, flags: 64 }).catch(() => {});
         } else {
           await interaction.reply({ content: errorMsg, flags: 64 }).catch(() => {});
         }
