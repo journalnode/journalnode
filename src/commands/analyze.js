@@ -338,7 +338,7 @@ async function runTechnical(interaction, timeframe, imageUrl, modelIds) {
 // ─── Main command ───
 
 module.exports = {
-  name: 'analyze',
+  name: 'llmanalyze',
   description: 'LLM-powered market analysis — bullish/bearish, valuations, and technical analysis.',
   needsEntries: false,
 
@@ -362,7 +362,7 @@ module.exports = {
       const target = interaction.options.getString('target');
       // Store context, show model picker
       pendingAnalysis.set(interaction.user.id, { mode: 'multival', asset, target, interactionToken: interaction.token, channelId: interaction.channelId });
-      const row = buildModelSelectMenu('analyze_model_select', 8, false);
+      const row = buildModelSelectMenu('llmanalyze_model_select', 8, false);
       await interaction.editReply({ content: `Select up to 8 models for **${asset}** valuation by **${target}**:`, components: [row] });
 
     } else if (sub === 'technical') {
@@ -373,7 +373,7 @@ module.exports = {
         return;
       }
       pendingAnalysis.set(interaction.user.id, { mode: 'technical', timeframe, imageUrl: screenshot.url, interactionToken: interaction.token, channelId: interaction.channelId });
-      const row = buildModelSelectMenu('analyze_model_select', 8, true);
+      const row = buildModelSelectMenu('llmanalyze_model_select', 8, true);
       await interaction.editReply({ content: `Select up to 8 models for technical analysis (${timeframe}):`, components: [row] });
     }
   },
@@ -383,7 +383,7 @@ module.exports = {
     const userId = interaction.user.id;
     const pending = pendingAnalysis.get(userId);
     if (!pending) {
-      await interaction.reply({ content: 'No pending analysis found. Please run `/analyze` again.', flags: 64 });
+      await interaction.reply({ content: 'No pending analysis found. Please run `/llmanalyze` again.', flags: 64 });
       return;
     }
     pendingAnalysis.delete(userId);

@@ -207,7 +207,7 @@ slashCommands.push(menuBuilder.toJSON());
 // /analyze: 4 subcommands for LLM market analysis
 const { MODELS } = require('./models');
 const analyzeBuilder = new SlashCommandBuilder()
-  .setName('analyze')
+  .setName('llmanalyze')
   .setDescription(analyzeCmd.description)
   .addSubcommand(sub => sub
     .setName('bullish')
@@ -259,7 +259,7 @@ client.once('clientReady', async () => {
   try {
     console.log('Registering slash commands...');
     await rest.put(Routes.applicationCommands(client.user.id), { body: slashCommands });
-    const allNames = [...analysisCommands, 'chat', 'postfiat', 'wallets', 'send', 'balance', 'mint', 'gallery', 'receive', 'onboard', 'trade', 'menu', 'analyze'].map(c => `/${c}`).join(', ');
+    const allNames = [...analysisCommands, 'chat', 'postfiat', 'wallets', 'send', 'balance', 'mint', 'gallery', 'receive', 'onboard', 'trade', 'menu', 'llmanalyze'].map(c => `/${c}`).join(', ');
     console.log(`Registered ${slashCommands.length} slash commands: ${allNames}`);
   } catch (err) {
     console.error('Failed to register slash commands:', err);
@@ -297,14 +297,14 @@ client.on('interactionCreate', async (interaction) => {
     return;
   }
 
-  // Handle StringSelectMenu interactions (model selection for /analyze)
+  // Handle StringSelectMenu interactions (model selection for /llmanalyze)
   if (interaction.isStringSelectMenu()) {
-    if (interaction.customId === 'analyze_model_select') {
+    if (interaction.customId === 'llmanalyze_model_select') {
       try {
         await analyzeCmd.handleSelectMenu(interaction);
       } catch (err) {
-        console.error('[/analyze] Model select failed:', err);
-        const errorMsg = 'Something went wrong processing your model selection. Please try `/analyze` again.';
+        console.error('[/llmanalyze] Model select failed:', err);
+        const errorMsg = 'Something went wrong processing your model selection. Please try `/llmanalyze` again.';
         if (interaction.deferred || interaction.replied) {
           await interaction.followUp({ content: errorMsg, flags: 64 }).catch(() => {});
         } else {
