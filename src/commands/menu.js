@@ -1,0 +1,42 @@
+module.exports = {
+  name: 'menu',
+  description: 'View all Journal Node commands organized by suite.',
+  needsEntries: false,
+
+  async execute(interaction) {
+    const lines = [
+      '**📖 JOURNAL NODE — COMMAND MENU**',
+      '',
+      '**━━━ Personal Suite ━━━**',
+      '`/insight` — General AI-powered holistic analysis of your journal.',
+      '`/mood` — Emotional temperature — fear/doubt vs confidence over time.',
+      '`/focus` — Past, present, or future? Analyzes temporal orientation.',
+      '`/rhythm` — When do you write? Charts for day-of-week and time-of-day patterns.',
+      '`/cadence` — How consistent are you? Charts for streaks, gaps, and monthly frequency.',
+      '`/length` — How much are you writing? Charts word count trends over time.',
+      '`/topics` — What\'s on your mind? Tracks theme and topic evolution.',
+      '`/questions` — Self-questioning patterns — charts questions per entry over time.',
+      '`/vocab` — Is your thinking evolving? Charts vocabulary diversity over time.',
+      '`/chat` — Talk to your journal — ask questions, get advice, explore ideas.',
+      '`/onboard` — Set your journal purpose/goal and receive a 50 PFT reward.',
+      '',
+      '**━━━ Economic Suite ━━━**',
+      '`/trade` — Log a trade idea with asset, direction, prices, and reasoning.',
+      '',
+      '**━━━ Post Fiat Suite ━━━**',
+      '`/postfiat` — Opt in to the Post Fiat testnet — creates your first wallet.',
+      '`/balance` — Check PFT balance for all your wallets.',
+      '`/send` — Send PFT to an address from your active wallet.',
+      '`/receive` — Show your wallet address(es) in a copyable format.',
+      '`/mint` — Mint an NFT on the Post Fiat testnet from an IPFS URI or image upload.',
+      '`/gallery` — View all NFTs minted by your active wallet.',
+      '`/wallets list` — View all your saved wallets.',
+      '`/wallets create` — Generate a new wallet and save it.',
+      '`/wallets import` — Import an existing wallet with a seed phrase.',
+      '`/wallets delete` — Remove a wallet from your profile.',
+      '`/wallets set-active` — Set which wallet is your active wallet.',
+    ];
+
+    await interaction.editReply(lines.join('\n'));
+  },
+};

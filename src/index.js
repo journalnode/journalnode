@@ -38,6 +38,8 @@ const onboardCmd = require('./commands/onboard');
 commands.set(onboardCmd.name, onboardCmd);
 const tradeCmd = require('./commands/trade');
 commands.set(tradeCmd.name, tradeCmd);
+const menuCmd = require('./commands/menu');
+commands.set(menuCmd.name, menuCmd);
 
 const { chat: llmChat } = require('./openrouter');
 const { formatEntries, summarizeStats, sendLong } = require('./commands/helpers');
@@ -194,6 +196,12 @@ const tradeBuilder = new SlashCommandBuilder()
     .setRequired(false));
 slashCommands.push(tradeBuilder.toJSON());
 
+// /menu: no options needed
+const menuBuilder = new SlashCommandBuilder()
+  .setName('menu')
+  .setDescription(menuCmd.description);
+slashCommands.push(menuBuilder.toJSON());
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -211,7 +219,7 @@ client.once('clientReady', async () => {
   try {
     console.log('Registering slash commands...');
     await rest.put(Routes.applicationCommands(client.user.id), { body: slashCommands });
-    const allNames = [...analysisCommands, 'chat', 'postfiat', 'wallets', 'send', 'balance', 'mint', 'gallery', 'receive', 'onboard', 'trade'].map(c => `/${c}`).join(', ');
+    const allNames = [...analysisCommands, 'chat', 'postfiat', 'wallets', 'send', 'balance', 'mint', 'gallery', 'receive', 'onboard', 'trade', 'menu'].map(c => `/${c}`).join(', ');
     console.log(`Registered ${slashCommands.length} slash commands: ${allNames}`);
   } catch (err) {
     console.error('Failed to register slash commands:', err);
