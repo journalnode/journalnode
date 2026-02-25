@@ -12,9 +12,13 @@ async function fetchJournalEntries(channel, botId, limit = 500) {
     if (messages.size === 0) break;
 
     for (const msg of messages.values()) {
-      if (msg.author.bot) continue;
       if (msg.content.length === 0) continue;
-      if (msg.interaction) continue; // skip slash command invocations
+
+      // Include trade tickets posted by the bot
+      const isTradeTicket = msg.author.bot && msg.content.includes('TRADE TICKET');
+
+      if (msg.author.bot && !isTradeTicket) continue;
+      if (msg.interaction && !isTradeTicket) continue; // skip slash command invocations
 
       // Strip leading ! so prefix-chat messages read cleanly as journal entries
       const content = msg.content.startsWith('!') ? msg.content.slice(1).trim() : msg.content;
