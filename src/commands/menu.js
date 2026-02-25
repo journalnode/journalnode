@@ -17,7 +17,6 @@ module.exports = {
       '`/topics` — What\'s on your mind? Tracks theme and topic evolution.',
       '`/questions` — Self-questioning patterns — charts questions per entry over time.',
       '`/vocab` — Is your thinking evolving? Charts vocabulary diversity over time.',
-      '`/chat` — Talk to your journal — ask questions, get advice, explore ideas.',
       '`/onboard` — Set your journal purpose/goal and receive a 50 PFT reward.',
       '',
       '**━━━ Economic Suite ━━━**',
@@ -35,6 +34,10 @@ module.exports = {
       '`/wallets import` — Import an existing wallet with a seed phrase.',
       '`/wallets delete` — Remove a wallet from your profile.',
       '`/wallets set-active` — Set which wallet is your active wallet.',
+      '',
+      '**━━━ Other ━━━**',
+      '`/chat` — Talk to your journal — ask questions, get advice, explore ideas.',
+      '`! message` — Same as /chat but as a prefix command (e.g. `! what should I focus on?`).',
     ];
 
     await interaction.editReply(lines.join('\n'));
