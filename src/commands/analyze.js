@@ -160,13 +160,11 @@ async function runBullish(interaction, assetDescription, horizon) {
   const buildEmbed = (complete = false) => {
     const responded = details.length;
     const unclear = responded - bullishCount - bearishCount;
-    const color = responded === 0 ? 0x808080 : (bullishCount >= bearishCount ? 0x22c55e : 0xef4444);
-
     const embed = new EmbedBuilder()
       .setTitle('Bullish or Bearish — Results')
-      .setColor(color);
+      .setColor(0x9b59b6);
 
-    let desc = `**Asset:** ${assetDescription.slice(0, 200)}${assetDescription.length > 200 ? '...' : ''}\n`;
+    let desc = `**User Query:** ${assetDescription.slice(0, 200)}${assetDescription.length > 200 ? '...' : ''}\n`;
     desc += `**Horizon:** ${horizon}\n`;
 
     if (complete) {
@@ -178,7 +176,7 @@ async function runBullish(interaction, assetDescription, horizon) {
 
     for (const d of details) {
       const emoji = d.sentiment === 'bullish' ? '🟢' : d.sentiment === 'bearish' ? '🔴' : '⚪';
-      desc += `${emoji} **${d.model}:** ${d.sentiment.toUpperCase()}${d.explanation ? '  ' + d.explanation : ''}\n`;
+      desc += `${emoji} **${d.model}:** ${d.sentiment.toUpperCase()}\n`;
     }
 
     embed.setDescription(desc.slice(0, 4090));
@@ -475,7 +473,7 @@ module.exports = {
       );
 
     const row1 = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('llma_bullish').setLabel('A) Bullish or Bearish').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('llma_bullish').setLabel('A) Bullish or Bearish').setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId('llma_multival').setLabel('B) Multi-Valuation').setStyle(ButtonStyle.Success),
       new ButtonBuilder().setCustomId('llma_soloval').setLabel('C) Solo-Valuation').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('llma_technical').setLabel('D) Technical Analyst').setStyle(ButtonStyle.Danger),
