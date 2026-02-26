@@ -377,6 +377,32 @@ async function runSoloVal(interaction, asset, target, modelId, runs) {
   await interaction.editReply({ embeds: [finalEmbed], files: [file] });
 }
 
+function technicalBreakdownChart(title, details, longCount, shortCount) {
+  const validDetails = details.filter(d => d.direction === 'long' || d.direction === 'short');
+  const names = validDetails.map(d => d.model);
+  const data = validDetails.map(d => d.direction === 'long' ? 1 : -1);
+  const colors = validDetails.map(d => d.direction === 'long' ? '#22c55e' : '#ef4444');
+
+  return {
+    type: 'horizontalBar',
+    data: {
+      labels: names,
+      datasets: [{
+        data,
+        backgroundColor: colors,
+      }],
+    },
+    options: {
+      title: { display: true, text: `${title}  |  Long: ${longCount}  Short: ${shortCount}`, fontSize: 14 },
+      legend: { display: false },
+      scales: {
+        xAxes: [{ display: false, ticks: { min: -1.5, max: 1.5 } }],
+        yAxes: [{ ticks: { fontSize: 11 } }],
+      },
+    },
+  };
+}
+
 // ─── Mode: Technical Analyst — vision models, progressive embed ───
 
 async function runTechnical(interaction, timeframe, imageUrl, modelIds) {
@@ -388,25 +414,35 @@ async function runTechnical(interaction, timeframe, imageUrl, modelIds) {
 
   const buildEmbed = (complete = false) => {
     const responded = details.length;
-    const unclear = responded - longCount - shortCount;
-    const color = responded === 0 ? 0x808080 : (longCount >= shortCount ? 0x22c55e : 0xef4444);
+    const noResponse = responded - longCount - shortCount;
 
     const embed = new EmbedBuilder()
-      .setTitle('Technical Analyst — Results')
-      .setColor(color);
+      .setTitle(`Technical Analyst — ${timeframe} Chart`)
+      .setColor(0xef4444);
 
-    let desc = `**Timeframe:** ${timeframe}\n`;
+    let desc = '';
 
     if (complete) {
-      desc += `**Result:** ${longCount} Long / ${shortCount} Short${unclear > 0 ? ` / ${unclear} Unclear` : ''}\n`;
-    } else {
-      desc += `**Progress:** ${responded}/${modelIds.length} models responded...\n`;
-    }
-    desc += '\n';
+      const total = longCount + shortCount;
+      const longPct = total > 0 ? Math.round(longCount / total * 100) : 0;
+      const shortPct = total > 0 ? Math.round(shortCount / total * 100) : 0;
 
-    for (const d of details) {
-      const emoji = d.direction === 'long' ? '🟢' : d.direction === 'short' ? '🔴' : '⚪';
-      desc += `${emoji} **${d.model}:** ${d.direction.toUpperCase()}${d.explanation ? '  ' + d.explanation : ''}\n`;
+      desc += '**Consensus**\n';
+      desc += `**LONG:** ${longCount} models (${longPct}%)\n`;
+      desc += `**SHORT:** ${shortCount} models (${shortPct}%)\n`;
+      if (noResponse > 0) desc += `**No Response:** ${noResponse}\n`;
+      desc += '\n';
+
+      const longModels = details.filter(d => d.direction === 'long').map(d => d.model);
+      const shortModels = details.filter(d => d.direction === 'short').map(d => d.model);
+      if (longModels.length > 0) desc += `**LONG (${longModels.length})**\n${longModels.join(', ')}\n\n`;
+      if (shortModels.length > 0) desc += `**SHORT (${shortModels.length})**\n${shortModels.join(', ')}\n`;
+    } else {
+      desc += `**Progress:** ${responded}/${modelIds.length} models responded...\n\n`;
+      for (const d of details) {
+        const emoji = d.direction === 'long' ? '🟢' : d.direction === 'short' ? '🔴' : '⚪';
+        desc += `${emoji} **${d.model}:** ${d.direction.toUpperCase()}\n`;
+      }
     }
 
     embed.setDescription(desc.slice(0, 4090));
@@ -422,9 +458,9 @@ async function runTechnical(interaction, timeframe, imageUrl, modelIds) {
       const direction = parseDirection(response);
       if (direction === 'long') longCount++;
       else if (direction === 'short') shortCount++;
-      details.push({ model: model?.name || id, direction: direction || 'unclear', explanation: extractExplanation(response) });
+      details.push({ model: model?.name || id, direction: direction || 'unclear' });
     } catch (err) {
-      details.push({ model: model?.name || id, direction: 'error', explanation: '' });
+      details.push({ model: model?.name || id, direction: 'error' });
     }
   });
 
@@ -442,7 +478,7 @@ async function runTechnical(interaction, timeframe, imageUrl, modelIds) {
     if (done) break;
   }
 
-  const chartBuf = await fetchChart(longShortBar(`Technical Analysis — ${timeframe}`, longCount, shortCount));
+  const chartBuf = await fetchChart(technicalBreakdownChart(`Technical Analysis: ${timeframe}`, details, longCount, shortCount));
   const file = new AttachmentBuilder(chartBuf, { name: 'technical.png' });
   const finalEmbed = buildEmbed(true);
   finalEmbed.setImage('attachment://technical.png');
@@ -457,11 +493,6 @@ module.exports = {
   needsEntries: false,
 
   async execute(interaction) {
-    const screenshot = interaction.options.getAttachment('screenshot');
-    if (screenshot && screenshot.contentType?.startsWith('image/')) {
-      pendingAnalysis.set(interaction.user.id, { screenshotUrl: screenshot.url });
-    }
-
     const embed = new EmbedBuilder()
       .setTitle('LLM Market Analyzer')
       .setDescription(
@@ -552,20 +583,10 @@ module.exports = {
       await interaction.showModal(modal);
 
     } else if (id === 'llma_technical') {
-      const pending = pendingAnalysis.get(interaction.user.id);
-      if (!pending?.screenshotUrl) {
-        await interaction.reply({ content: 'Please re-run `/llmanalyze` with a chart screenshot attached.', flags: 64 });
-        return;
-      }
-      const modal = new ModalBuilder()
-        .setCustomId('llma_technical_modal')
-        .setTitle('Technical Analyst')
-        .addComponents(
-          new ActionRowBuilder().addComponents(
-            new TextInputBuilder().setCustomId('timeframe').setLabel('Chart timeframe (e.g. 4H, Daily, 1W)').setStyle(TextInputStyle.Short).setRequired(true)
-          ),
-        );
-      await interaction.showModal(modal);
+      // Show vision model select — screenshot will be uploaded later in channel
+      pendingAnalysis.set(interaction.user.id, { mode: 'technical_select' });
+      const row = buildModelSelectMenu('llmanalyze_model_select', 8, true);
+      await interaction.reply({ content: 'Technical Analyst — Select up to 8 vision-capable models:', components: [row], flags: 64 });
     }
   },
 
@@ -601,11 +622,43 @@ module.exports = {
 
     } else if (id === 'llma_technical_modal') {
       const timeframe = interaction.fields.getTextInputValue('timeframe');
-      const existing = pendingAnalysis.get(interaction.user.id) || {};
-      pendingAnalysis.set(interaction.user.id, { ...existing, mode: 'technical', timeframe });
+      const existing = pendingAnalysis.get(interaction.user.id);
+      if (!existing?.models) {
+        await interaction.reply({ content: 'No model selection found. Please try `/llmanalyze` again.', flags: 64 });
+        return;
+      }
+      const models = existing.models;
+      const modelNames = models.map(mid => getModelById(mid)?.name || mid).join(', ');
+      pendingAnalysis.delete(interaction.user.id);
+
       await interaction.deferReply();
-      const row = buildModelSelectMenu('llmanalyze_model_select', 8, true);
-      await interaction.editReply({ content: `Select up to 8 models for technical analysis (${timeframe}):`, components: [row] });
+
+      const waitEmbed = new EmbedBuilder()
+        .setTitle('Technical Analyst')
+        .setColor(0xef4444)
+        .setDescription(
+          `**Timeframe:** ${timeframe}\n` +
+          `**Models:** ${modelNames}\n\n` +
+          'Please upload your candlestick chart image now.\n' +
+          'Send it as a message in this channel within 60 seconds.'
+        );
+      await interaction.editReply({ embeds: [waitEmbed] });
+
+      // Wait for user to post an image in the channel
+      const channel = interaction.channel ?? await interaction.client.channels.fetch(interaction.channelId);
+      const filter = (msg) => msg.author.id === interaction.user.id && msg.attachments.some(a => a.contentType?.startsWith('image/'));
+
+      try {
+        const collected = await channel.awaitMessages({ filter, max: 1, time: 60000, errors: ['time'] });
+        const imageUrl = collected.first().attachments.filter(a => a.contentType?.startsWith('image/')).first().url;
+        await runTechnical(interaction, timeframe, imageUrl, models);
+      } catch (err) {
+        const timeoutEmbed = new EmbedBuilder()
+          .setTitle('Technical Analyst')
+          .setColor(0xef4444)
+          .setDescription('No chart image received within 60 seconds. Please try `/llmanalyze` again.');
+        await interaction.editReply({ embeds: [timeoutEmbed] });
+      }
     }
   },
 
@@ -617,17 +670,32 @@ module.exports = {
       await interaction.reply({ content: 'No pending analysis found. Please run `/llmanalyze` again.', flags: 64 });
       return;
     }
-    pendingAnalysis.delete(userId);
 
     const selectedModels = interaction.values;
+
+    // Technical flow: show timeframe modal (don't defer — modals must be immediate)
+    if (pending.mode === 'technical_select') {
+      pendingAnalysis.set(userId, { ...pending, mode: 'technical_ready', models: selectedModels });
+      const modal = new ModalBuilder()
+        .setCustomId('llma_technical_modal')
+        .setTitle('Technical Analyst')
+        .addComponents(
+          new ActionRowBuilder().addComponents(
+            new TextInputBuilder().setCustomId('timeframe').setLabel('Chart timeframe (e.g. 4H, Daily, 1W)').setStyle(TextInputStyle.Short).setRequired(true)
+          ),
+        );
+      await interaction.showModal(modal);
+      return;
+    }
+
+    // Other modes: defer and process
+    pendingAnalysis.delete(userId);
     await interaction.deferUpdate();
 
     if (pending.mode === 'multival') {
       await runMultiVal(interaction, pending.asset, pending.target, selectedModels);
     } else if (pending.mode === 'soloval') {
       await runSoloVal(interaction, pending.asset, pending.target, selectedModels[0], pending.runs);
-    } else if (pending.mode === 'technical') {
-      await runTechnical(interaction, pending.timeframe, pending.screenshotUrl, selectedModels);
     }
   },
 

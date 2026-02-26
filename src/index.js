@@ -204,11 +204,10 @@ const menuBuilder = new SlashCommandBuilder()
   .setDescription(menuCmd.description);
 slashCommands.push(menuBuilder.toJSON());
 
-// /llmanalyze: single command with optional screenshot — modes shown as buttons
+// /llmanalyze: modes shown as buttons
 const analyzeBuilder = new SlashCommandBuilder()
   .setName('llmanalyze')
-  .setDescription(analyzeCmd.description)
-  .addAttachmentOption(opt => opt.setName('screenshot').setDescription('Chart screenshot (for Technical Analyst mode)').setRequired(false));
+  .setDescription(analyzeCmd.description);
 slashCommands.push(analyzeBuilder.toJSON());
 
 const client = new Client({
