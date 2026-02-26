@@ -2,7 +2,6 @@ const { StringSelectMenuBuilder, ActionRowBuilder, AttachmentBuilder, ButtonBuil
 const { callModel } = require('../openrouter');
 const { MODELS, getModelById, getVisionModels } = require('../models');
 
-// Pending interactions waiting for model selection / modal data
 const pendingAnalysis = new Map();
 
 // ─── Chart helpers via QuickChart.io ───
@@ -23,7 +22,7 @@ function pieChart(title, bullishCount, bearishCount) {
     },
     options: {
       title: { display: true, text: title, fontSize: 16 },
-      plugins: { datalabels: { color: '#fff', font: { size: 14, weight: 'bold' }, formatter: (v, ctx) => { const total = ctx.dataset.data.reduce((a, b) => a + b, 0); return Math.round(v / total * 100) + '%'; } } },
+      plugins: { datalabels: { color: '#fff', font: { size: 14, weight: 'bold' }, formatter: (v, ctx) => { const total = ctx.dataset.data.reduce((a, b) => a + b, 0); return total === 0 ? '' : Math.round(v / total * 100) + '%'; } } },
     },
   };
 }
@@ -114,8 +113,8 @@ function parseDirection(text) {
 
 // ─── Prompts ───
 
-function bullishPrompt(asset, horizon) {
-  return `You are a financial analyst. The user wants to know if you are bullish or bearish on "${asset}" over the next ${horizon}. Consider fundamentals, market conditions, sentiment, and technical factors. You MUST respond with EXACTLY one word on the first line: either "BULLISH" or "BEARISH". Then on the next line, give a one-sentence explanation.`;
+function bullishPrompt(assetDescription, horizon) {
+  return `You are a financial analyst evaluating an investment pitch. Here is the user's description of the asset:\n\n"${assetDescription}"\n\nOver the next ${horizon}, are you bullish or bearish? Consider the pitch's merits, fundamentals, market conditions, and risks. You MUST respond with EXACTLY one word on the first line: either "BULLISH" or "BEARISH". Then on the next line, give a one-sentence explanation.`;
 }
 
 function valuationPrompt(asset, targetTime) {
@@ -143,195 +142,313 @@ function buildModelSelectMenu(customId, maxValues, visionOnly) {
   return new ActionRowBuilder().addComponents(menu);
 }
 
-// ─── Mode handlers ───
+// ─── Helper: extract explanation from LLM response ───
 
-async function runBullish(interaction, asset, horizon) {
-  await interaction.editReply({ content: `Querying all ${MODELS.length} models on **${asset}** (${horizon})... this may take a moment.`, embeds: [], components: [] });
-
-  const systemPrompt = bullishPrompt(asset, horizon);
-  const userMsg = `Asset: ${asset}\nTime horizon: ${horizon}\n\nAre you bullish or bearish?`;
-
-  const results = await Promise.allSettled(
-    MODELS.map(async (model) => {
-      const response = await callModel(model.id, systemPrompt, userMsg, { maxTokens: 200 });
-      const sentiment = parseSentiment(response);
-      return { model: model.name, modelId: model.id, sentiment, response: response.slice(0, 150) };
-    })
-  );
-
-  let bullish = 0, bearish = 0;
-  const details = [];
-  for (const r of results) {
-    if (r.status === 'fulfilled' && r.value.sentiment) {
-      if (r.value.sentiment === 'bullish') bullish++;
-      else bearish++;
-      details.push(r.value);
-    } else if (r.status === 'fulfilled') {
-      details.push({ ...r.value, sentiment: 'unclear' });
-    } else {
-      details.push({ model: 'Unknown', sentiment: 'error', response: r.reason?.message || 'Failed' });
-    }
-  }
-
-  const chartBuf = await fetchChart(pieChart(`${asset} — Bullish vs Bearish (${horizon})`, bullish, bearish));
-  const file = new AttachmentBuilder(chartBuf, { name: 'sentiment.png' });
-
-  const lines = [
-    `**━━━ BULLISH OR BEARISH ━━━**`,
-    `**Asset:** ${asset} | **Horizon:** ${horizon}`,
-    `**Result:** ${bullish} Bullish / ${bearish} Bearish / ${details.length - bullish - bearish} Unclear`,
-    '',
-  ];
-
-  for (const d of details) {
-    const emoji = d.sentiment === 'bullish' ? '🟢' : d.sentiment === 'bearish' ? '🔴' : '⚪';
-    lines.push(`${emoji} **${d.model}:** ${d.response.split('\n').slice(0, 2).join(' ').slice(0, 100)}`);
-  }
-
-  const text = lines.join('\n').slice(0, 1900);
-  await interaction.editReply({ content: text, files: [file] });
+function extractExplanation(response) {
+  return response.split('\n').filter(l => l.trim()).slice(1).join(' ').slice(0, 80);
 }
 
-async function runMultiVal(interaction, asset, target, modelIds) {
-  await interaction.editReply({ content: `Querying ${modelIds.length} models for **${asset}** valuation by **${target}**...`, components: [] });
+// ─── Mode: Bullish or Bearish — all 18 models, progressive embed ───
 
+async function runBullish(interaction, assetDescription, horizon) {
+  const systemPrompt = bullishPrompt(assetDescription, horizon);
+  const userMsg = `${assetDescription}\n\nTime horizon: ${horizon}\n\nAre you bullish or bearish?`;
+
+  const details = [];
+  let bullishCount = 0, bearishCount = 0;
+
+  const buildEmbed = (complete = false) => {
+    const responded = details.length;
+    const unclear = responded - bullishCount - bearishCount;
+    const color = responded === 0 ? 0x808080 : (bullishCount >= bearishCount ? 0x22c55e : 0xef4444);
+
+    const embed = new EmbedBuilder()
+      .setTitle('Bullish or Bearish — Results')
+      .setColor(color);
+
+    let desc = `**Asset:** ${assetDescription.slice(0, 200)}${assetDescription.length > 200 ? '...' : ''}\n`;
+    desc += `**Horizon:** ${horizon}\n`;
+
+    if (complete) {
+      desc += `**Result:** ${bullishCount} Bullish / ${bearishCount} Bearish${unclear > 0 ? ` / ${unclear} Unclear` : ''}\n`;
+    } else {
+      desc += `**Progress:** ${responded}/${MODELS.length} models responded...\n`;
+    }
+    desc += '\n';
+
+    for (const d of details) {
+      const emoji = d.sentiment === 'bullish' ? '🟢' : d.sentiment === 'bearish' ? '🔴' : '⚪';
+      desc += `${emoji} **${d.model}:** ${d.sentiment.toUpperCase()}${d.explanation ? '  ' + d.explanation : ''}\n`;
+    }
+
+    embed.setDescription(desc.slice(0, 4090));
+    return embed;
+  };
+
+  // Show initial loading embed
+  await interaction.editReply({ embeds: [buildEmbed()], components: [] });
+
+  // Fire all model calls
+  const promises = MODELS.map(async (model) => {
+    try {
+      const response = await callModel(model.id, systemPrompt, userMsg, { maxTokens: 200 });
+      const sentiment = parseSentiment(response);
+      if (sentiment === 'bullish') bullishCount++;
+      else if (sentiment === 'bearish') bearishCount++;
+      details.push({ model: model.name, sentiment: sentiment || 'unclear', explanation: extractExplanation(response) });
+    } catch (err) {
+      details.push({ model: model.name, sentiment: 'error', explanation: '' });
+    }
+  });
+
+  // Progress update loop — edit embed every 3 seconds as results stream in
+  const allDone = Promise.all(promises);
+  let prevCount = 0;
+  while (true) {
+    const done = await Promise.race([
+      allDone.then(() => true),
+      new Promise(r => setTimeout(() => r(false), 3000)),
+    ]);
+    if (details.length > prevCount) {
+      prevCount = details.length;
+      await interaction.editReply({ embeds: [buildEmbed()] }).catch(() => {});
+    }
+    if (done) break;
+  }
+
+  // Final update with chart
+  const chartBuf = await fetchChart(pieChart('Bullish vs Bearish', bullishCount, bearishCount));
+  const file = new AttachmentBuilder(chartBuf, { name: 'sentiment.png' });
+  const finalEmbed = buildEmbed(true);
+  finalEmbed.setImage('attachment://sentiment.png');
+  await interaction.editReply({ embeds: [finalEmbed], files: [file] });
+}
+
+// ─── Mode: Multi-Valuation — up to 8 models, progressive embed ───
+
+async function runMultiVal(interaction, asset, target, modelIds) {
   const systemPrompt = valuationPrompt(asset, target);
   const userMsg = `Asset: ${asset}\nTarget: ${target}\n\nWhat is your market cap estimate?`;
 
-  const results = await Promise.allSettled(
-    modelIds.map(async (id) => {
-      const model = getModelById(id);
+  const details = [];
+
+  const buildEmbed = (complete = false) => {
+    const embed = new EmbedBuilder()
+      .setTitle('Multi-Valuation — Results')
+      .setColor(0x6366f1);
+
+    let desc = `**Asset:** ${asset}\n**Target:** ${target}\n`;
+
+    if (complete) {
+      const validValues = details.filter(d => d.value).map(d => d.value);
+      if (validValues.length > 0) {
+        const avg = validValues.reduce((a, b) => a + b, 0) / validValues.length;
+        desc += `**Avg Estimate:** ${formatNum(avg)} (${details.filter(d => d.value).length} models)\n`;
+      }
+    } else {
+      desc += `**Progress:** ${details.length}/${modelIds.length} models responded...\n`;
+    }
+    desc += '\n';
+
+    for (const d of details) {
+      desc += `📊 **${d.model}:** ${d.value ? formatNum(d.value) : 'N/A'}${d.explanation ? '  ' + d.explanation : ''}\n`;
+    }
+
+    embed.setDescription(desc.slice(0, 4090));
+    return embed;
+  };
+
+  await interaction.editReply({ embeds: [buildEmbed()], components: [] });
+
+  const promises = modelIds.map(async (id) => {
+    const model = getModelById(id);
+    try {
       const response = await callModel(id, systemPrompt, userMsg, { maxTokens: 200 });
       const value = parseNumber(response);
-      return { model: model?.name || id, value, response: response.slice(0, 150) };
-    })
-  );
-
-  const labels = [], values = [], details = [];
-  for (const r of results) {
-    if (r.status === 'fulfilled' && r.value.value) {
-      labels.push(r.value.model);
-      values.push(r.value.value);
-      details.push(r.value);
-    } else if (r.status === 'fulfilled') {
-      details.push({ ...r.value, value: null });
+      details.push({ model: model?.name || id, value, explanation: extractExplanation(response) });
+    } catch (err) {
+      details.push({ model: model?.name || id, value: null, explanation: '' });
     }
+  });
+
+  const allDone = Promise.all(promises);
+  let prevCount = 0;
+  while (true) {
+    const done = await Promise.race([
+      allDone.then(() => true),
+      new Promise(r => setTimeout(() => r(false), 3000)),
+    ]);
+    if (details.length > prevCount) {
+      prevCount = details.length;
+      await interaction.editReply({ embeds: [buildEmbed()] }).catch(() => {});
+    }
+    if (done) break;
   }
 
-  const chartBuf = await fetchChart(barChart(`${asset} Market Cap Estimates — ${target}`, labels, values, 'Market Cap'));
-  const file = new AttachmentBuilder(chartBuf, { name: 'multival.png' });
-
-  const lines = [
-    `**━━━ MULTI-VALUATION ━━━**`,
-    `**Asset:** ${asset} | **Target:** ${target}`,
-    '',
-  ];
-
+  const labels = [], values = [];
   for (const d of details) {
-    lines.push(`**${d.model}:** ${d.value ? formatNum(d.value) : 'N/A'} — ${d.response.split('\n').slice(1).join(' ').slice(0, 80)}`);
+    if (d.value) { labels.push(d.model); values.push(d.value); }
   }
 
-  const text = lines.join('\n').slice(0, 1900);
-  await interaction.editReply({ content: text, files: [file] });
+  const chartBuf = await fetchChart(barChart(`Market Cap Estimates — ${target}`, labels, values, 'Market Cap'));
+  const file = new AttachmentBuilder(chartBuf, { name: 'multival.png' });
+  const finalEmbed = buildEmbed(true);
+  finalEmbed.setImage('attachment://multival.png');
+  await interaction.editReply({ embeds: [finalEmbed], files: [file] });
 }
+
+// ─── Mode: Solo-Valuation — 1 model, N runs, progressive embed ───
 
 async function runSoloVal(interaction, asset, target, modelId, runs) {
   const model = getModelById(modelId);
   const modelName = model?.name || modelId;
-  await interaction.editReply({ content: `Running ${runs} valuation(s) with **${modelName}** for **${asset}** by **${target}**...`, components: [] });
-
   const systemPrompt = valuationPrompt(asset, target);
   const userMsg = `Asset: ${asset}\nTarget: ${target}\n\nWhat is your market cap estimate?`;
 
-  const results = await Promise.allSettled(
-    Array.from({ length: runs }, (_, i) =>
-      callModel(modelId, systemPrompt, userMsg, { maxTokens: 200 })
-    )
-  );
+  const runResults = [];
 
-  const labels = [], values = [];
-  for (let i = 0; i < results.length; i++) {
-    if (results[i].status === 'fulfilled') {
-      const val = parseNumber(results[i].value);
-      if (val) {
-        labels.push(`Run ${i + 1}`);
-        values.push(val);
-      }
+  const buildEmbed = (complete = false, mean = 0, median = 0) => {
+    const embed = new EmbedBuilder()
+      .setTitle('Solo-Valuation — Results')
+      .setColor(0x6366f1);
+
+    let desc = `**Asset:** ${asset}\n**Target:** ${target}\n**Model:** ${modelName}\n`;
+
+    if (complete && runResults.length > 0) {
+      desc += `**Mean:** ${formatNum(mean)} | **Median:** ${formatNum(median)}\n`;
+    } else {
+      desc += `**Progress:** ${runResults.length}/${runs} runs completed...\n`;
     }
+    desc += '\n';
+
+    runResults.forEach((v, i) => {
+      desc += `Run ${i + 1}: ${v ? formatNum(v) : 'N/A'}\n`;
+    });
+
+    embed.setDescription(desc.slice(0, 4090));
+    return embed;
+  };
+
+  await interaction.editReply({ embeds: [buildEmbed()], components: [] });
+
+  const promises = Array.from({ length: runs }, async (_, i) => {
+    try {
+      const response = await callModel(modelId, systemPrompt, userMsg, { maxTokens: 200 });
+      const val = parseNumber(response);
+      runResults.push(val);
+    } catch (err) {
+      runResults.push(null);
+    }
+  });
+
+  const allDone = Promise.all(promises);
+  let prevCount = 0;
+  while (true) {
+    const done = await Promise.race([
+      allDone.then(() => true),
+      new Promise(r => setTimeout(() => r(false), 2000)),
+    ]);
+    if (runResults.length > prevCount) {
+      prevCount = runResults.length;
+      await interaction.editReply({ embeds: [buildEmbed()] }).catch(() => {});
+    }
+    if (done) break;
   }
 
+  const values = runResults.filter(v => v !== null);
   if (values.length === 0) {
-    await interaction.editReply(`No valid estimates returned from ${modelName}. Please try again.`);
+    const errorEmbed = new EmbedBuilder()
+      .setTitle('Solo-Valuation — Results')
+      .setColor(0xef4444)
+      .setDescription(`No valid estimates returned from **${modelName}**. Please try again.`);
+    await interaction.editReply({ embeds: [errorEmbed] });
     return;
   }
 
+  const labels = values.map((_, i) => `Run ${i + 1}`);
   const sorted = [...values].sort((a, b) => a - b);
   const mean = values.reduce((a, b) => a + b, 0) / values.length;
   const median = sorted.length % 2 === 0
     ? (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2
     : sorted[Math.floor(sorted.length / 2)];
 
-  const chartBuf = await fetchChart(barChartWithStats(`${asset} — ${modelName} (${runs} runs) — ${target}`, labels, values, mean, median));
+  const chartBuf = await fetchChart(barChartWithStats(`${modelName} — ${runs} runs — ${target}`, labels, values, mean, median));
   const file = new AttachmentBuilder(chartBuf, { name: 'soloval.png' });
-
-  const lines = [
-    `**━━━ SOLO-VALUATION ━━━**`,
-    `**Asset:** ${asset} | **Target:** ${target} | **Model:** ${modelName}`,
-    `**Runs:** ${values.length} | **Mean:** ${formatNum(mean)} | **Median:** ${formatNum(median)}`,
-    '',
-  ];
-  values.forEach((v, i) => lines.push(`Run ${i + 1}: ${formatNum(v)}`));
-
-  const text = lines.join('\n').slice(0, 1900);
-  await interaction.editReply({ content: text, files: [file] });
+  const finalEmbed = buildEmbed(true, mean, median);
+  finalEmbed.setImage('attachment://soloval.png');
+  await interaction.editReply({ embeds: [finalEmbed], files: [file] });
 }
 
-async function runTechnical(interaction, timeframe, imageUrl, modelIds) {
-  await interaction.editReply({ content: `Querying ${modelIds.length} models for technical analysis (${timeframe})...`, components: [] });
+// ─── Mode: Technical Analyst — vision models, progressive embed ───
 
+async function runTechnical(interaction, timeframe, imageUrl, modelIds) {
   const systemPrompt = technicalPrompt(timeframe);
   const userMsg = `Timeframe: ${timeframe}\n\nAnalyze this chart and give your LONG or SHORT recommendation.`;
 
-  const results = await Promise.allSettled(
-    modelIds.map(async (id) => {
-      const model = getModelById(id);
+  const details = [];
+  let longCount = 0, shortCount = 0;
+
+  const buildEmbed = (complete = false) => {
+    const responded = details.length;
+    const unclear = responded - longCount - shortCount;
+    const color = responded === 0 ? 0x808080 : (longCount >= shortCount ? 0x22c55e : 0xef4444);
+
+    const embed = new EmbedBuilder()
+      .setTitle('Technical Analyst — Results')
+      .setColor(color);
+
+    let desc = `**Timeframe:** ${timeframe}\n`;
+
+    if (complete) {
+      desc += `**Result:** ${longCount} Long / ${shortCount} Short${unclear > 0 ? ` / ${unclear} Unclear` : ''}\n`;
+    } else {
+      desc += `**Progress:** ${responded}/${modelIds.length} models responded...\n`;
+    }
+    desc += '\n';
+
+    for (const d of details) {
+      const emoji = d.direction === 'long' ? '🟢' : d.direction === 'short' ? '🔴' : '⚪';
+      desc += `${emoji} **${d.model}:** ${d.direction.toUpperCase()}${d.explanation ? '  ' + d.explanation : ''}\n`;
+    }
+
+    embed.setDescription(desc.slice(0, 4090));
+    return embed;
+  };
+
+  await interaction.editReply({ embeds: [buildEmbed()], components: [] });
+
+  const promises = modelIds.map(async (id) => {
+    const model = getModelById(id);
+    try {
       const response = await callModel(id, systemPrompt, userMsg, { imageUrl, maxTokens: 200 });
       const direction = parseDirection(response);
-      return { model: model?.name || id, direction, response: response.slice(0, 150) };
-    })
-  );
-
-  let longs = 0, shorts = 0;
-  const details = [];
-  for (const r of results) {
-    if (r.status === 'fulfilled' && r.value.direction) {
-      if (r.value.direction === 'long') longs++;
-      else shorts++;
-      details.push(r.value);
-    } else if (r.status === 'fulfilled') {
-      details.push({ ...r.value, direction: 'unclear' });
-    } else {
-      details.push({ model: 'Unknown', direction: 'error', response: r.reason?.message || 'Failed' });
+      if (direction === 'long') longCount++;
+      else if (direction === 'short') shortCount++;
+      details.push({ model: model?.name || id, direction: direction || 'unclear', explanation: extractExplanation(response) });
+    } catch (err) {
+      details.push({ model: model?.name || id, direction: 'error', explanation: '' });
     }
+  });
+
+  const allDone = Promise.all(promises);
+  let prevCount = 0;
+  while (true) {
+    const done = await Promise.race([
+      allDone.then(() => true),
+      new Promise(r => setTimeout(() => r(false), 3000)),
+    ]);
+    if (details.length > prevCount) {
+      prevCount = details.length;
+      await interaction.editReply({ embeds: [buildEmbed()] }).catch(() => {});
+    }
+    if (done) break;
   }
 
-  const chartBuf = await fetchChart(longShortBar(`Technical Analysis — ${timeframe}`, longs, shorts));
+  const chartBuf = await fetchChart(longShortBar(`Technical Analysis — ${timeframe}`, longCount, shortCount));
   const file = new AttachmentBuilder(chartBuf, { name: 'technical.png' });
-
-  const lines = [
-    `**━━━ TECHNICAL ANALYST ━━━**`,
-    `**Timeframe:** ${timeframe}`,
-    `**Result:** ${longs} Long / ${shorts} Short / ${details.length - longs - shorts} Unclear`,
-    '',
-  ];
-
-  for (const d of details) {
-    const emoji = d.direction === 'long' ? '🟢' : d.direction === 'short' ? '🔴' : '⚪';
-    lines.push(`${emoji} **${d.model}:** ${d.response.split('\n').slice(0, 2).join(' ').slice(0, 100)}`);
-  }
-
-  const text = lines.join('\n').slice(0, 1900);
-  await interaction.editReply({ content: text, files: [file] });
+  const finalEmbed = buildEmbed(true);
+  finalEmbed.setImage('attachment://technical.png');
+  await interaction.editReply({ embeds: [finalEmbed], files: [file] });
 }
 
 // ─── Main command ───
@@ -342,7 +459,6 @@ module.exports = {
   needsEntries: false,
 
   async execute(interaction) {
-    // Store screenshot URL if user attached one (needed for Technical Analyst mode)
     const screenshot = interaction.options.getAttachment('screenshot');
     if (screenshot && screenshot.contentType?.startsWith('image/')) {
       pendingAnalysis.set(interaction.user.id, { screenshotUrl: screenshot.url });
@@ -352,25 +468,35 @@ module.exports = {
       .setTitle('LLM Market Analyzer')
       .setDescription(
         'Pick a mode:\n\n' +
-        '**A) Bullish or Bearish** — All 18 models vote on sentiment. Pie chart.\n' +
+        '**A) Bullish or Bearish** — Pitch an asset to all 18 models. Pie chart.\n' +
         '**B) Multi-Valuation** — Pick up to 8 models for market cap estimates. Bar chart.\n' +
         '**C) Solo-Valuation** — Run 1 model up to 5 times to test consistency. Bar chart.\n' +
         '**D) Technical Analyst** — Vision models analyze your chart screenshot. Long/Short.'
       );
 
-    const row = new ActionRowBuilder().addComponents(
+    const row1 = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId('llma_bullish').setLabel('A) Bullish or Bearish').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('llma_multival').setLabel('B) Multi-Valuation').setStyle(ButtonStyle.Success),
       new ButtonBuilder().setCustomId('llma_soloval').setLabel('C) Solo-Valuation').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('llma_technical').setLabel('D) Technical Analyst').setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId('llma_info').setLabel('?').setStyle(ButtonStyle.Primary),
     );
 
-    await interaction.editReply({ embeds: [embed], components: [row] });
+    await interaction.editReply({ embeds: [embed], components: [row1] });
   },
 
-  // Handle button clicks — show modals for each mode
+  // Handle button clicks
   async handleButton(interaction) {
     const id = interaction.customId;
+
+    if (id === 'llma_info') {
+      const modelList = MODELS.map((m, i) => `${i + 1}. **${m.name}** — \`${m.id}\`${m.vision ? ' 👁' : ''}`).join('\n');
+      await interaction.reply({
+        content: `**18 Models queried by LLM Analyzer:**\n\n${modelList}\n\n👁 = supports vision/image analysis`,
+        flags: 64,
+      });
+      return;
+    }
 
     if (id === 'llma_bullish') {
       const modal = new ModalBuilder()
@@ -378,10 +504,20 @@ module.exports = {
         .setTitle('Bullish or Bearish')
         .addComponents(
           new ActionRowBuilder().addComponents(
-            new TextInputBuilder().setCustomId('asset').setLabel('Asset (e.g. BTC, ETH, AAPL)').setStyle(TextInputStyle.Short).setRequired(true)
+            new TextInputBuilder()
+              .setCustomId('asset')
+              .setLabel('Describe the asset briefly')
+              .setStyle(TextInputStyle.Paragraph)
+              .setPlaceholder('e.g. Ethereum is a smart contract platform with growing DeFi adoption...')
+              .setRequired(true)
+              .setMaxLength(500)
           ),
           new ActionRowBuilder().addComponents(
-            new TextInputBuilder().setCustomId('horizon').setLabel('Time horizon (e.g. 3 months, EOY 2026)').setStyle(TextInputStyle.Short).setRequired(true)
+            new TextInputBuilder()
+              .setCustomId('horizon')
+              .setLabel('Time horizon (e.g. 3 months, EOY 2026)')
+              .setStyle(TextInputStyle.Short)
+              .setRequired(true)
           ),
         );
       await interaction.showModal(modal);
@@ -435,7 +571,7 @@ module.exports = {
     }
   },
 
-  // Handle modal submissions for each mode
+  // Handle modal submissions
   async handleModalSubmit(interaction) {
     const id = interaction.customId;
 
