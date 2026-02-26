@@ -204,42 +204,11 @@ const menuBuilder = new SlashCommandBuilder()
   .setDescription(menuCmd.description);
 slashCommands.push(menuBuilder.toJSON());
 
-// /analyze: 4 subcommands for LLM market analysis
-const { MODELS } = require('./models');
+// /llmanalyze: single command with optional screenshot — modes shown as buttons
 const analyzeBuilder = new SlashCommandBuilder()
   .setName('llmanalyze')
   .setDescription(analyzeCmd.description)
-  .addSubcommand(sub => sub
-    .setName('bullish')
-    .setDescription('All 18 models vote bullish or bearish on an asset.')
-    .addStringOption(opt => opt.setName('asset').setDescription('Asset to analyze (e.g. BTC, ETH, AAPL)').setRequired(true))
-    .addStringOption(opt => opt.setName('horizon').setDescription('Time horizon (e.g. 3 months, 1 year, EOY 2026)').setRequired(true)))
-  .addSubcommand(sub => sub
-    .setName('multival')
-    .setDescription('Up to 8 models estimate market cap at a target date.')
-    .addStringOption(opt => opt.setName('asset').setDescription('Asset to value (e.g. BTC, ETH, AAPL)').setRequired(true))
-    .addStringOption(opt => opt.setName('target').setDescription('Target quarter/year (e.g. Q3 2026, EOY 2027)').setRequired(true)))
-  .addSubcommand(sub => {
-    sub.setName('soloval')
-      .setDescription('One model runs multiple valuations — shows distribution.')
-      .addStringOption(opt => opt.setName('asset').setDescription('Asset to value (e.g. BTC, ETH, AAPL)').setRequired(true))
-      .addStringOption(opt => opt.setName('target').setDescription('Target quarter/year (e.g. Q3 2026, EOY 2027)').setRequired(true))
-      .addIntegerOption(opt => opt.setName('runs').setDescription('Number of runs (1-5, default 3)').setRequired(false).setMinValue(1).setMaxValue(5));
-    const modelOpt = opt => {
-      opt.setName('model').setDescription('LLM model to use').setRequired(true);
-      for (const m of MODELS) {
-        opt.addChoices({ name: m.name, value: m.id });
-      }
-      return opt;
-    };
-    sub.addStringOption(modelOpt);
-    return sub;
-  })
-  .addSubcommand(sub => sub
-    .setName('technical')
-    .setDescription('Up to 8 models analyze a chart screenshot — long or short.')
-    .addStringOption(opt => opt.setName('timeframe').setDescription('Chart timeframe (e.g. 4H, Daily, 1W)').setRequired(true))
-    .addAttachmentOption(opt => opt.setName('screenshot').setDescription('Candlestick chart screenshot').setRequired(true)));
+  .addAttachmentOption(opt => opt.setName('screenshot').setDescription('Chart screenshot (for Technical Analyst mode)').setRequired(false));
 slashCommands.push(analyzeBuilder.toJSON());
 
 const client = new Client({
@@ -289,6 +258,36 @@ client.on('interactionCreate', async (interaction) => {
         const errorMsg = 'Something went wrong logging your trade. Please try again.';
         if (interaction.deferred || interaction.replied) {
           await interaction.followUp(errorMsg).catch(() => {});
+        } else {
+          await interaction.reply({ content: errorMsg, flags: 64 }).catch(() => {});
+        }
+      }
+    } else if (interaction.customId.startsWith('llma_') && interaction.customId.endsWith('_modal')) {
+      try {
+        await analyzeCmd.handleModalSubmit(interaction);
+      } catch (err) {
+        console.error('[/llmanalyze] Modal submit failed:', err);
+        const errorMsg = 'Something went wrong. Please try `/llmanalyze` again.';
+        if (interaction.deferred || interaction.replied) {
+          await interaction.followUp({ content: errorMsg, flags: 64 }).catch(() => {});
+        } else {
+          await interaction.reply({ content: errorMsg, flags: 64 }).catch(() => {});
+        }
+      }
+    }
+    return;
+  }
+
+  // Handle button interactions (mode selection for /llmanalyze)
+  if (interaction.isButton()) {
+    if (interaction.customId.startsWith('llma_')) {
+      try {
+        await analyzeCmd.handleButton(interaction);
+      } catch (err) {
+        console.error('[/llmanalyze] Button handler failed:', err);
+        const errorMsg = 'Something went wrong. Please try `/llmanalyze` again.';
+        if (interaction.deferred || interaction.replied) {
+          await interaction.followUp({ content: errorMsg, flags: 64 }).catch(() => {});
         } else {
           await interaction.reply({ content: errorMsg, flags: 64 }).catch(() => {});
         }

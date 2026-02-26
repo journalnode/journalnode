@@ -1,8 +1,8 @@
-const { StringSelectMenuBuilder, ActionRowBuilder, AttachmentBuilder } = require('discord.js');
+const { StringSelectMenuBuilder, ActionRowBuilder, AttachmentBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
 const { callModel } = require('../openrouter');
 const { MODELS, getModelById, getVisionModels } = require('../models');
 
-// Pending interactions waiting for model selection
+// Pending interactions waiting for model selection / modal data
 const pendingAnalysis = new Map();
 
 // ─── Chart helpers via QuickChart.io ───
@@ -63,7 +63,7 @@ function barChartWithStats(title, labels, values, mean, median) {
   };
 }
 
-function longShortBar(title, labels, longs, shorts) {
+function longShortBar(title, longs, shorts) {
   return {
     type: 'bar',
     data: {
@@ -86,7 +86,6 @@ function formatNum(n) {
 }
 
 function parseNumber(text) {
-  // Extract a number from LLM response — handles $1.5T, $500B, $10M, etc.
   const cleaned = text.replace(/,/g, '');
   const trillionMatch = cleaned.match(/\$?([\d.]+)\s*[Tt](?:rillion)?/);
   if (trillionMatch) return parseFloat(trillionMatch[1]) * 1e12;
@@ -147,7 +146,7 @@ function buildModelSelectMenu(customId, maxValues, visionOnly) {
 // ─── Mode handlers ───
 
 async function runBullish(interaction, asset, horizon) {
-  await interaction.editReply(`Querying all ${MODELS.length} models on **${asset}** (${horizon})... this may take a moment.`);
+  await interaction.editReply({ content: `Querying all ${MODELS.length} models on **${asset}** (${horizon})... this may take a moment.`, embeds: [], components: [] });
 
   const systemPrompt = bullishPrompt(asset, horizon);
   const userMsg = `Asset: ${asset}\nTime horizon: ${horizon}\n\nAre you bullish or bearish?`;
@@ -194,7 +193,7 @@ async function runBullish(interaction, asset, horizon) {
 }
 
 async function runMultiVal(interaction, asset, target, modelIds) {
-  await interaction.editReply(`Querying ${modelIds.length} models for **${asset}** valuation by **${target}**...`);
+  await interaction.editReply({ content: `Querying ${modelIds.length} models for **${asset}** valuation by **${target}**...`, components: [] });
 
   const systemPrompt = valuationPrompt(asset, target);
   const userMsg = `Asset: ${asset}\nTarget: ${target}\n\nWhat is your market cap estimate?`;
@@ -239,7 +238,7 @@ async function runMultiVal(interaction, asset, target, modelIds) {
 async function runSoloVal(interaction, asset, target, modelId, runs) {
   const model = getModelById(modelId);
   const modelName = model?.name || modelId;
-  await interaction.editReply(`Running ${runs} valuation(s) with **${modelName}** for **${asset}** by **${target}**...`);
+  await interaction.editReply({ content: `Running ${runs} valuation(s) with **${modelName}** for **${asset}** by **${target}**...`, components: [] });
 
   const systemPrompt = valuationPrompt(asset, target);
   const userMsg = `Asset: ${asset}\nTarget: ${target}\n\nWhat is your market cap estimate?`;
@@ -288,7 +287,7 @@ async function runSoloVal(interaction, asset, target, modelId, runs) {
 }
 
 async function runTechnical(interaction, timeframe, imageUrl, modelIds) {
-  await interaction.editReply(`Querying ${modelIds.length} models for technical analysis (${timeframe})...`);
+  await interaction.editReply({ content: `Querying ${modelIds.length} models for technical analysis (${timeframe})...`, components: [] });
 
   const systemPrompt = technicalPrompt(timeframe);
   const userMsg = `Timeframe: ${timeframe}\n\nAnalyze this chart and give your LONG or SHORT recommendation.`;
@@ -316,7 +315,7 @@ async function runTechnical(interaction, timeframe, imageUrl, modelIds) {
     }
   }
 
-  const chartBuf = await fetchChart(longShortBar(`Technical Analysis — ${timeframe}`, [], longs, shorts));
+  const chartBuf = await fetchChart(longShortBar(`Technical Analysis — ${timeframe}`, longs, shorts));
   const file = new AttachmentBuilder(chartBuf, { name: 'technical.png' });
 
   const lines = [
@@ -343,36 +342,134 @@ module.exports = {
   needsEntries: false,
 
   async execute(interaction) {
-    const sub = interaction.options.getSubcommand();
+    // Store screenshot URL if user attached one (needed for Technical Analyst mode)
+    const screenshot = interaction.options.getAttachment('screenshot');
+    if (screenshot && screenshot.contentType?.startsWith('image/')) {
+      pendingAnalysis.set(interaction.user.id, { screenshotUrl: screenshot.url });
+    }
 
-    if (sub === 'bullish') {
-      const asset = interaction.options.getString('asset');
-      const horizon = interaction.options.getString('horizon');
+    const embed = new EmbedBuilder()
+      .setTitle('LLM Market Analyzer')
+      .setDescription(
+        'Pick a mode:\n\n' +
+        '**A) Bullish or Bearish** — All 18 models vote on sentiment. Pie chart.\n' +
+        '**B) Multi-Valuation** — Pick up to 8 models for market cap estimates. Bar chart.\n' +
+        '**C) Solo-Valuation** — Run 1 model up to 5 times to test consistency. Bar chart.\n' +
+        '**D) Technical Analyst** — Vision models analyze your chart screenshot. Long/Short.'
+      );
+
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('llma_bullish').setLabel('A) Bullish or Bearish').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('llma_multival').setLabel('B) Multi-Valuation').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('llma_soloval').setLabel('C) Solo-Valuation').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('llma_technical').setLabel('D) Technical Analyst').setStyle(ButtonStyle.Danger),
+    );
+
+    await interaction.editReply({ embeds: [embed], components: [row] });
+  },
+
+  // Handle button clicks — show modals for each mode
+  async handleButton(interaction) {
+    const id = interaction.customId;
+
+    if (id === 'llma_bullish') {
+      const modal = new ModalBuilder()
+        .setCustomId('llma_bullish_modal')
+        .setTitle('Bullish or Bearish')
+        .addComponents(
+          new ActionRowBuilder().addComponents(
+            new TextInputBuilder().setCustomId('asset').setLabel('Asset (e.g. BTC, ETH, AAPL)').setStyle(TextInputStyle.Short).setRequired(true)
+          ),
+          new ActionRowBuilder().addComponents(
+            new TextInputBuilder().setCustomId('horizon').setLabel('Time horizon (e.g. 3 months, EOY 2026)').setStyle(TextInputStyle.Short).setRequired(true)
+          ),
+        );
+      await interaction.showModal(modal);
+
+    } else if (id === 'llma_multival') {
+      const modal = new ModalBuilder()
+        .setCustomId('llma_multival_modal')
+        .setTitle('Multi-Valuation')
+        .addComponents(
+          new ActionRowBuilder().addComponents(
+            new TextInputBuilder().setCustomId('asset').setLabel('Asset (e.g. BTC, ETH, AAPL)').setStyle(TextInputStyle.Short).setRequired(true)
+          ),
+          new ActionRowBuilder().addComponents(
+            new TextInputBuilder().setCustomId('target').setLabel('Target (e.g. Q3 2026, EOY 2027)').setStyle(TextInputStyle.Short).setRequired(true)
+          ),
+        );
+      await interaction.showModal(modal);
+
+    } else if (id === 'llma_soloval') {
+      const modal = new ModalBuilder()
+        .setCustomId('llma_soloval_modal')
+        .setTitle('Solo-Valuation')
+        .addComponents(
+          new ActionRowBuilder().addComponents(
+            new TextInputBuilder().setCustomId('asset').setLabel('Asset (e.g. BTC, ETH, AAPL)').setStyle(TextInputStyle.Short).setRequired(true)
+          ),
+          new ActionRowBuilder().addComponents(
+            new TextInputBuilder().setCustomId('target').setLabel('Target (e.g. Q3 2026, EOY 2027)').setStyle(TextInputStyle.Short).setRequired(true)
+          ),
+          new ActionRowBuilder().addComponents(
+            new TextInputBuilder().setCustomId('runs').setLabel('Number of runs (1-5, default 3)').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('3')
+          ),
+        );
+      await interaction.showModal(modal);
+
+    } else if (id === 'llma_technical') {
+      const pending = pendingAnalysis.get(interaction.user.id);
+      if (!pending?.screenshotUrl) {
+        await interaction.reply({ content: 'Please re-run `/llmanalyze` with a chart screenshot attached.', flags: 64 });
+        return;
+      }
+      const modal = new ModalBuilder()
+        .setCustomId('llma_technical_modal')
+        .setTitle('Technical Analyst')
+        .addComponents(
+          new ActionRowBuilder().addComponents(
+            new TextInputBuilder().setCustomId('timeframe').setLabel('Chart timeframe (e.g. 4H, Daily, 1W)').setStyle(TextInputStyle.Short).setRequired(true)
+          ),
+        );
+      await interaction.showModal(modal);
+    }
+  },
+
+  // Handle modal submissions for each mode
+  async handleModalSubmit(interaction) {
+    const id = interaction.customId;
+
+    if (id === 'llma_bullish_modal') {
+      const asset = interaction.fields.getTextInputValue('asset');
+      const horizon = interaction.fields.getTextInputValue('horizon');
+      await interaction.deferReply();
       await runBullish(interaction, asset, horizon);
 
-    } else if (sub === 'soloval') {
-      const asset = interaction.options.getString('asset');
-      const target = interaction.options.getString('target');
-      const modelId = interaction.options.getString('model');
-      const runs = interaction.options.getInteger('runs') || 3;
-      await runSoloVal(interaction, asset, target, modelId, runs);
-
-    } else if (sub === 'multival') {
-      const asset = interaction.options.getString('asset');
-      const target = interaction.options.getString('target');
-      // Store context, show model picker
-      pendingAnalysis.set(interaction.user.id, { mode: 'multival', asset, target, interactionToken: interaction.token, channelId: interaction.channelId });
+    } else if (id === 'llma_multival_modal') {
+      const asset = interaction.fields.getTextInputValue('asset');
+      const target = interaction.fields.getTextInputValue('target');
+      const existing = pendingAnalysis.get(interaction.user.id) || {};
+      pendingAnalysis.set(interaction.user.id, { ...existing, mode: 'multival', asset, target });
+      await interaction.deferReply();
       const row = buildModelSelectMenu('llmanalyze_model_select', 8, false);
       await interaction.editReply({ content: `Select up to 8 models for **${asset}** valuation by **${target}**:`, components: [row] });
 
-    } else if (sub === 'technical') {
-      const timeframe = interaction.options.getString('timeframe');
-      const screenshot = interaction.options.getAttachment('screenshot');
-      if (!screenshot || !screenshot.contentType?.startsWith('image/')) {
-        await interaction.editReply('Please attach a chart screenshot (image file).');
-        return;
-      }
-      pendingAnalysis.set(interaction.user.id, { mode: 'technical', timeframe, imageUrl: screenshot.url, interactionToken: interaction.token, channelId: interaction.channelId });
+    } else if (id === 'llma_soloval_modal') {
+      const asset = interaction.fields.getTextInputValue('asset');
+      const target = interaction.fields.getTextInputValue('target');
+      const runsStr = interaction.fields.getTextInputValue('runs');
+      const runs = Math.min(5, Math.max(1, parseInt(runsStr) || 3));
+      const existing = pendingAnalysis.get(interaction.user.id) || {};
+      pendingAnalysis.set(interaction.user.id, { ...existing, mode: 'soloval', asset, target, runs });
+      await interaction.deferReply();
+      const row = buildModelSelectMenu('llmanalyze_model_select', 1, false);
+      await interaction.editReply({ content: `Select a model for **${asset}** solo-valuation (${runs} runs) by **${target}**:`, components: [row] });
+
+    } else if (id === 'llma_technical_modal') {
+      const timeframe = interaction.fields.getTextInputValue('timeframe');
+      const existing = pendingAnalysis.get(interaction.user.id) || {};
+      pendingAnalysis.set(interaction.user.id, { ...existing, mode: 'technical', timeframe });
+      await interaction.deferReply();
       const row = buildModelSelectMenu('llmanalyze_model_select', 8, true);
       await interaction.editReply({ content: `Select up to 8 models for technical analysis (${timeframe}):`, components: [row] });
     }
@@ -389,13 +486,14 @@ module.exports = {
     pendingAnalysis.delete(userId);
 
     const selectedModels = interaction.values;
-    // Acknowledge and defer — this will be a new reply since the select menu is a component interaction
     await interaction.deferUpdate();
 
     if (pending.mode === 'multival') {
       await runMultiVal(interaction, pending.asset, pending.target, selectedModels);
+    } else if (pending.mode === 'soloval') {
+      await runSoloVal(interaction, pending.asset, pending.target, selectedModels[0], pending.runs);
     } else if (pending.mode === 'technical') {
-      await runTechnical(interaction, pending.timeframe, pending.imageUrl, selectedModels);
+      await runTechnical(interaction, pending.timeframe, pending.screenshotUrl, selectedModels);
     }
   },
 
