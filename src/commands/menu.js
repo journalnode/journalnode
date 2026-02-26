@@ -37,6 +37,28 @@ module.exports = {
       '`! message` — Prefix command for chat.',
     ];
 
-    await interaction.editReply(lines.join('\n'));
+    const full = lines.join('\n');
+    if (full.length <= 2000) {
+      await interaction.editReply(full);
+    } else {
+      // Split by suite sections (double newline) and send as multiple messages
+      const chunks = [];
+      let current = '';
+      for (const line of lines) {
+        const next = current ? current + '\n' + line : line;
+        if (next.length > 1900 && current) {
+          chunks.push(current);
+          current = line;
+        } else {
+          current = next;
+        }
+      }
+      if (current) chunks.push(current);
+
+      await interaction.editReply(chunks[0]);
+      for (let i = 1; i < chunks.length; i++) {
+        await interaction.followUp({ content: chunks[i], flags: 64 });
+      }
+    }
   },
 };
