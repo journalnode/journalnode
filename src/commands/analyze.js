@@ -478,11 +478,18 @@ async function runTechnical(interaction, timeframe, imageUrl, modelIds) {
     if (done) break;
   }
 
-  const chartBuf = await fetchChart(technicalBreakdownChart(`Technical Analysis: ${timeframe}`, details, longCount, shortCount));
-  const file = new AttachmentBuilder(chartBuf, { name: 'technical.png' });
+  // Final embed — no chart embedded
   const finalEmbed = buildEmbed(true);
-  finalEmbed.setImage('attachment://technical.png');
-  await interaction.editReply({ embeds: [finalEmbed], files: [file] });
+  await interaction.editReply({ embeds: [finalEmbed] });
+
+  // Send two charts as a separate followUp message
+  const [consensusBuf, breakdownBuf] = await Promise.all([
+    fetchChart(longShortBar(`Consensus — ${timeframe}`, longCount, shortCount)),
+    fetchChart(technicalBreakdownChart(`Model Breakdown — ${timeframe}`, details, longCount, shortCount)),
+  ]);
+  const consensusFile = new AttachmentBuilder(consensusBuf, { name: 'consensus.png' });
+  const breakdownFile = new AttachmentBuilder(breakdownBuf, { name: 'breakdown.png' });
+  await interaction.followUp({ files: [consensusFile, breakdownFile] });
 }
 
 // ─── Main command ───
