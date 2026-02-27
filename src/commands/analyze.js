@@ -6,8 +6,9 @@ const pendingAnalysis = new Map();
 
 // ─── Chart helpers via QuickChart.io ───
 
-async function fetchChart(config) {
-  const url = `https://quickchart.io/chart?c=${encodeURIComponent(JSON.stringify(config))}&w=600&h=400&bkg=white`;
+async function fetchChart(config, opts = {}) {
+  const { width = 600, height = 400, bkg = 'white' } = opts;
+  const url = `https://quickchart.io/chart?c=${encodeURIComponent(JSON.stringify(config))}&w=${width}&h=${height}&bkg=${encodeURIComponent(bkg)}`;
   const res = await fetch(url);
   if (!res.ok) throw new Error(`QuickChart failed: ${res.status}`);
   return Buffer.from(await res.arrayBuffer());
@@ -71,6 +72,7 @@ function longShortBar(title, longs, shorts) {
     },
     options: {
       title: { display: true, text: title, fontSize: 16 },
+      legend: { display: false },
       scales: { yAxes: [{ ticks: { beginAtZero: true, stepSize: 1 } }] },
       plugins: { datalabels: { font: { size: 14, weight: 'bold' } } },
     },
@@ -403,6 +405,86 @@ function technicalBreakdownChart(title, details, longCount, shortCount) {
   };
 }
 
+// ─── Combined dual-chart image for Technical Analyst ───
+
+async function buildCombinedTechnicalChart(timeframe, details, longCount, shortCount) {
+  const sharp = require('sharp');
+
+  // Left chart: Consensus vertical bar (Long vs Short counts)
+  const consensusConfig = {
+    type: 'bar',
+    data: {
+      labels: ['LONG', 'SHORT'],
+      datasets: [{ data: [longCount, shortCount], backgroundColor: ['#22c55e', '#ef4444'] }],
+    },
+    options: {
+      title: { display: true, text: 'Consensus', fontSize: 16, fontColor: '#ffffff' },
+      legend: { display: false },
+      scales: {
+        yAxes: [{
+          scaleLabel: { display: true, labelString: 'Number of Models', fontColor: '#aaaaaa' },
+          ticks: { beginAtZero: true, stepSize: 1, fontColor: '#cccccc' },
+          gridLines: { color: '#333333' },
+        }],
+        xAxes: [{ ticks: { fontColor: '#cccccc' }, gridLines: { color: '#333333' } }],
+      },
+      plugins: { datalabels: { color: '#ffffff', font: { size: 16, weight: 'bold' }, anchor: 'end', align: 'top' } },
+    },
+  };
+
+  // Right chart: Model Breakdown horizontal bar (per-model Long/Short)
+  const validDetails = details.filter(d => d.direction === 'long' || d.direction === 'short');
+  const breakdownConfig = {
+    type: 'horizontalBar',
+    data: {
+      labels: validDetails.map(d => d.model),
+      datasets: [{
+        data: validDetails.map(d => d.direction === 'long' ? 1 : -1),
+        backgroundColor: validDetails.map(d => d.direction === 'long' ? '#22c55e' : '#ef4444'),
+      }],
+    },
+    options: {
+      title: { display: true, text: 'Model Breakdown', fontSize: 16, fontColor: '#ffffff' },
+      legend: { display: false },
+      scales: {
+        xAxes: [{ display: false, ticks: { min: -1.5, max: 1.5 } }],
+        yAxes: [{ ticks: { fontSize: 11, fontColor: '#cccccc' }, gridLines: { color: '#333333' } }],
+      },
+    },
+  };
+
+  const chartW = 430, chartH = 350;
+  const [leftBuf, rightBuf] = await Promise.all([
+    fetchChart(consensusConfig, { width: chartW, height: chartH, bkg: '#000000' }),
+    fetchChart(breakdownConfig, { width: chartW + 40, height: chartH, bkg: '#000000' }),
+  ]);
+
+  const totalW = chartW + chartW + 40;
+  const titleH = 45;
+  const totalH = titleH + chartH;
+
+  // Title via SVG overlay
+  const safeTimeframe = timeframe.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const titleSvg = Buffer.from(
+    `<svg width="${totalW}" height="${titleH}">` +
+    `<text x="${totalW / 2}" y="32" font-family="Arial,sans-serif" font-size="20" font-weight="bold" fill="white" text-anchor="middle">Technical Analysis: ${safeTimeframe}</text>` +
+    `</svg>`
+  );
+
+  const combined = await sharp({
+    create: { width: totalW, height: totalH, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 1 } },
+  })
+    .composite([
+      { input: titleSvg, top: 0, left: 0 },
+      { input: leftBuf, top: titleH, left: 0 },
+      { input: rightBuf, top: titleH, left: chartW },
+    ])
+    .png()
+    .toBuffer();
+
+  return combined;
+}
+
 // ─── Mode: Technical Analyst — vision models, progressive embed ───
 
 async function runTechnical(interaction, timeframe, imageUrl, modelIds) {
@@ -482,14 +564,10 @@ async function runTechnical(interaction, timeframe, imageUrl, modelIds) {
   const finalEmbed = buildEmbed(true);
   await interaction.editReply({ embeds: [finalEmbed] });
 
-  // Send two charts as a separate followUp message
-  const [consensusBuf, breakdownBuf] = await Promise.all([
-    fetchChart(longShortBar(`Consensus — ${timeframe}`, longCount, shortCount)),
-    fetchChart(technicalBreakdownChart(`Model Breakdown — ${timeframe}`, details, longCount, shortCount)),
-  ]);
-  const consensusFile = new AttachmentBuilder(consensusBuf, { name: 'consensus.png' });
-  const breakdownFile = new AttachmentBuilder(breakdownBuf, { name: 'breakdown.png' });
-  await interaction.followUp({ files: [consensusFile, breakdownFile] });
+  // Send combined dual-chart image as a separate followUp
+  const combinedBuf = await buildCombinedTechnicalChart(timeframe, details, longCount, shortCount);
+  const file = new AttachmentBuilder(combinedBuf, { name: 'technical.png' });
+  await interaction.followUp({ files: [file] });
 }
 
 // ─── Main command ───
