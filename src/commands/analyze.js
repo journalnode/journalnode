@@ -565,9 +565,14 @@ async function runTechnical(interaction, timeframe, imageUrl, modelIds) {
   await interaction.editReply({ embeds: [finalEmbed] });
 
   // Send combined dual-chart image as a separate followUp
-  const combinedBuf = await buildCombinedTechnicalChart(timeframe, details, longCount, shortCount);
-  const file = new AttachmentBuilder(combinedBuf, { name: 'technical.png' });
-  await interaction.followUp({ files: [file] });
+  try {
+    const combinedBuf = await buildCombinedTechnicalChart(timeframe, details, longCount, shortCount);
+    const file = new AttachmentBuilder(combinedBuf, { name: 'technical.png' });
+    await interaction.followUp({ files: [file] });
+  } catch (chartErr) {
+    console.error('Chart generation error:', chartErr);
+    await interaction.followUp({ content: `Chart generation failed: ${chartErr.message}` });
+  }
 }
 
 // ─── Main command ───
@@ -733,16 +738,28 @@ module.exports = {
       const channel = interaction.channel ?? await interaction.client.channels.fetch(interaction.channelId);
       const filter = (msg) => msg.author.id === interaction.user.id && msg.attachments.some(a => a.contentType?.startsWith('image/'));
 
+      let imageUrl;
       try {
         const collected = await channel.awaitMessages({ filter, max: 1, time: 60000, errors: ['time'] });
-        const imageUrl = collected.first().attachments.filter(a => a.contentType?.startsWith('image/')).first().url;
-        await runTechnical(interaction, timeframe, imageUrl, models);
+        imageUrl = collected.first().attachments.filter(a => a.contentType?.startsWith('image/')).first().url;
       } catch (err) {
         const timeoutEmbed = new EmbedBuilder()
           .setTitle('Technical Analyst')
           .setColor(0xef4444)
           .setDescription('No chart image received within 60 seconds. Please try `/llmanalyze` again.');
         await interaction.editReply({ embeds: [timeoutEmbed] });
+        return;
+      }
+
+      try {
+        await runTechnical(interaction, timeframe, imageUrl, models);
+      } catch (err) {
+        console.error('Technical Analyst error:', err);
+        const errorEmbed = new EmbedBuilder()
+          .setTitle('Technical Analyst — Error')
+          .setColor(0xef4444)
+          .setDescription(`An error occurred generating the analysis chart. Please try again.\n\n\`${err.message}\``);
+        await interaction.editReply({ embeds: [errorEmbed] }).catch(() => {});
       }
     }
   },
