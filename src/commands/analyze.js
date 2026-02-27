@@ -8,7 +8,7 @@ const pendingAnalysis = new Map();
 
 async function fetchChart(config, opts = {}) {
   const { width = 600, height = 400, bkg = 'white' } = opts;
-  const url = `https://quickchart.io/chart?c=${encodeURIComponent(JSON.stringify(config))}&w=${width}&h=${height}&bkg=${encodeURIComponent(bkg)}`;
+  const url = `https://quickchart.io/chart?c=${encodeURIComponent(JSON.stringify(config))}&w=${width}&h=${height}&bkg=${encodeURIComponent(bkg)}&devicePixelRatio=1`;
   const res = await fetch(url);
   if (!res.ok) throw new Error(`QuickChart failed: ${res.status}`);
   return Buffer.from(await res.arrayBuffer());
@@ -453,13 +453,17 @@ async function buildCombinedTechnicalChart(timeframe, details, longCount, shortC
     },
   };
 
-  const chartW = 430, chartH = 350;
-  const [leftBuf, rightBuf] = await Promise.all([
-    fetchChart(consensusConfig, { width: chartW, height: chartH, bkg: '#000000' }),
-    fetchChart(breakdownConfig, { width: chartW + 40, height: chartH, bkg: '#000000' }),
+  const leftW = 430, rightW = 470, chartH = 350;
+  const [leftRaw, rightRaw] = await Promise.all([
+    fetchChart(consensusConfig, { width: leftW, height: chartH, bkg: '#000000' }),
+    fetchChart(breakdownConfig, { width: rightW, height: chartH, bkg: '#000000' }),
   ]);
 
-  const totalW = chartW + chartW + 40;
+  // Force-resize to exact dimensions (QuickChart may return different pixel ratio)
+  const leftBuf = await sharp(leftRaw).resize(leftW, chartH).png().toBuffer();
+  const rightBuf = await sharp(rightRaw).resize(rightW, chartH).png().toBuffer();
+
+  const totalW = leftW + rightW;
   const titleH = 45;
   const totalH = titleH + chartH;
 
@@ -477,7 +481,7 @@ async function buildCombinedTechnicalChart(timeframe, details, longCount, shortC
     .composite([
       { input: titleSvg, top: 0, left: 0 },
       { input: leftBuf, top: titleH, left: 0 },
-      { input: rightBuf, top: titleH, left: chartW },
+      { input: rightBuf, top: titleH, left: leftW },
     ])
     .png()
     .toBuffer();
