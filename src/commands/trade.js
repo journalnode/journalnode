@@ -117,6 +117,7 @@ module.exports = {
       .setColor(direction.toLowerCase() === 'long' ? 0x22c55e : 0xef4444);
 
     let desc = '';
+    desc += `**Trade ID:** \`${trade.tradeId}\`\n`;
     desc += `**Trader:** ${username}\n`;
     desc += `**Asset:** ${asset}\n`;
     desc += `**Direction:** ${directionEmoji} ${direction.toUpperCase()}\n`;
