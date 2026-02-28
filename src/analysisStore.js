@@ -3,34 +3,33 @@ const path = require('path');
 const crypto = require('crypto');
 
 const DATA_DIR = path.join(__dirname, '..', 'data');
-const TRADES_FILE = path.join(DATA_DIR, 'trades.json');
+const ANALYSIS_FILE = path.join(DATA_DIR, 'analyses.json');
 
 function loadStore() {
   if (!fs.existsSync(DATA_DIR)) {
     fs.mkdirSync(DATA_DIR, { recursive: true });
   }
-  if (!fs.existsSync(TRADES_FILE)) {
+  if (!fs.existsSync(ANALYSIS_FILE)) {
     return {};
   }
-  return JSON.parse(fs.readFileSync(TRADES_FILE, 'utf8'));
+  return JSON.parse(fs.readFileSync(ANALYSIS_FILE, 'utf8'));
 }
 
 function saveStore(store) {
   if (!fs.existsSync(DATA_DIR)) {
     fs.mkdirSync(DATA_DIR, { recursive: true });
   }
-  fs.writeFileSync(TRADES_FILE, JSON.stringify(store, null, 2));
+  fs.writeFileSync(ANALYSIS_FILE, JSON.stringify(store, null, 2));
 }
 
-function addTrade(userId, trade) {
+function saveAnalysis(userId, record) {
   const store = loadStore();
   if (!store[userId]) {
     store[userId] = [];
   }
   const entry = {
-    id: store[userId].length + 1,
-    tradeId: crypto.randomUUID(),
-    ...trade,
+    analysisId: crypto.randomUUID(),
+    ...record,
     createdAt: new Date().toISOString(),
   };
   store[userId].push(entry);
@@ -38,14 +37,10 @@ function addTrade(userId, trade) {
   return entry;
 }
 
-function getUserTrades(userId) {
+function getAnalysesByTradeId(userId, tradeId) {
   const store = loadStore();
-  return store[userId] || [];
+  const all = store[userId] || [];
+  return all.filter(a => a.tradeId === tradeId);
 }
 
-function getTradeByTradeId(userId, tradeId) {
-  const trades = getUserTrades(userId);
-  return trades.find(t => t.tradeId === tradeId) || null;
-}
-
-module.exports = { addTrade, getUserTrades, getTradeByTradeId };
+module.exports = { saveAnalysis, getAnalysesByTradeId };

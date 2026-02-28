@@ -1,4 +1,4 @@
-const { ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder } = require('discord.js');
+const { ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, EmbedBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const { addTrade } = require('../tradeStore');
 
 // Temporary storage for pre-modal data (direction + screenshot URL)
@@ -111,32 +111,38 @@ module.exports = {
 
     console.log(`[/trade] ${username} logged trade #${trade.id}: ${direction} ${asset} @ ${entry} → ${target}`);
 
-    // Build the public trade ticket message
-    const lines = [
-      `**━━━ TRADE TICKET #${trade.id} ━━━**`,
-      '',
-      `**Trader:** ${username}`,
-      `**Asset:** ${asset}`,
-      `**Direction:** ${directionEmoji} ${direction.toUpperCase()}`,
-      `**Entry:** ${entry}`,
-      `**Target:** ${target}`,
-      `**Timeframe:** ${timeframe}`,
-      '',
-      `**Emotion & Reasoning:**`,
-      emotionReasoning,
-      '',
-      `**Logged:** ${new Date(trade.createdAt).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })}`,
-    ];
+    // Build the public trade ticket embed
+    const embed = new EmbedBuilder()
+      .setTitle(`TRADE TICKET #${trade.id}`)
+      .setColor(direction.toLowerCase() === 'long' ? 0x22c55e : 0xef4444);
+
+    let desc = '';
+    desc += `**Trader:** ${username}\n`;
+    desc += `**Asset:** ${asset}\n`;
+    desc += `**Direction:** ${directionEmoji} ${direction.toUpperCase()}\n`;
+    desc += `**Entry:** ${entry}\n`;
+    desc += `**Target:** ${target}\n`;
+    desc += `**Timeframe:** ${timeframe}\n\n`;
+    desc += `**Emotion & Reasoning:**\n${emotionReasoning}\n\n`;
+    desc += `**Logged:** ${new Date(trade.createdAt).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })}`;
 
     if (screenshotUrl) {
-      lines.push('');
-      lines.push(`**Chart:** ${screenshotUrl}`);
+      desc += `\n\n**Chart:** ${screenshotUrl}`;
     }
 
-    lines.push('**━━━━━━━━━━━━━━━━━━━━━━━━━━━**');
+    embed.setDescription(desc);
+
+    // Button to launch LLM analysis linked to this trade
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`trade_llma_${trade.tradeId}`)
+        .setLabel('Run LLM Analysis')
+        .setEmoji('🔍')
+        .setStyle(ButtonStyle.Primary),
+    );
 
     // Post as a PUBLIC message in the channel (not ephemeral)
-    await interaction.reply(lines.join('\n'));
+    await interaction.reply({ embeds: [embed], components: [row] });
   },
 
   pendingTrades,

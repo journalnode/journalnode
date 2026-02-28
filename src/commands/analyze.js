@@ -1,6 +1,8 @@
 const { StringSelectMenuBuilder, ActionRowBuilder, AttachmentBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
 const { callModel } = require('../openrouter');
 const { MODELS, getModelById, getVisionModels } = require('../models');
+const { getTradeByTradeId } = require('../tradeStore');
+const { saveAnalysis } = require('../analysisStore');
 
 const pendingAnalysis = new Map();
 
@@ -152,7 +154,7 @@ function extractExplanation(response) {
 
 // ─── Mode: Bullish or Bearish — all 18 models, progressive embed ───
 
-async function runBullish(interaction, assetDescription, horizon) {
+async function runBullish(interaction, assetDescription, horizon, tradeId) {
   const systemPrompt = bullishPrompt(assetDescription, horizon);
   const userMsg = `${assetDescription}\n\nTime horizon: ${horizon}\n\nAre you bullish or bearish?`;
 
@@ -222,11 +224,22 @@ async function runBullish(interaction, assetDescription, horizon) {
   const finalEmbed = buildEmbed(true);
   finalEmbed.setImage('attachment://sentiment.png');
   await interaction.editReply({ embeds: [finalEmbed], files: [file] });
+
+  // Persist analysis result
+  if (tradeId) {
+    saveAnalysis(interaction.user.id, {
+      tradeId,
+      mode: 'bullish',
+      asset: assetDescription,
+      horizon,
+      result: { bullishCount, bearishCount, details },
+    });
+  }
 }
 
 // ─── Mode: Multi-Valuation — up to 8 models, progressive embed ───
 
-async function runMultiVal(interaction, asset, target, modelIds) {
+async function runMultiVal(interaction, asset, target, modelIds, tradeId) {
   const systemPrompt = valuationPrompt(asset, target);
   const userMsg = `Asset: ${asset}\nTarget: ${target}\n\nWhat is your market cap estimate?`;
 
@@ -295,11 +308,21 @@ async function runMultiVal(interaction, asset, target, modelIds) {
   const finalEmbed = buildEmbed(true);
   finalEmbed.setImage('attachment://multival.png');
   await interaction.editReply({ embeds: [finalEmbed], files: [file] });
+
+  if (tradeId) {
+    saveAnalysis(interaction.user.id, {
+      tradeId,
+      mode: 'multival',
+      asset,
+      target,
+      result: { details },
+    });
+  }
 }
 
 // ─── Mode: Solo-Valuation — 1 model, N runs, progressive embed ───
 
-async function runSoloVal(interaction, asset, target, modelId, runs) {
+async function runSoloVal(interaction, asset, target, modelId, runs, tradeId) {
   const model = getModelById(modelId);
   const modelName = model?.name || modelId;
   const systemPrompt = valuationPrompt(asset, target);
@@ -377,6 +400,17 @@ async function runSoloVal(interaction, asset, target, modelId, runs) {
   const finalEmbed = buildEmbed(true, mean, median);
   finalEmbed.setImage('attachment://soloval.png');
   await interaction.editReply({ embeds: [finalEmbed], files: [file] });
+
+  if (tradeId) {
+    saveAnalysis(interaction.user.id, {
+      tradeId,
+      mode: 'soloval',
+      asset,
+      target,
+      model: modelName,
+      result: { mean, median, runResults: values },
+    });
+  }
 }
 
 function technicalBreakdownChart(title, details, longCount, shortCount) {
@@ -491,7 +525,7 @@ async function buildCombinedTechnicalChart(timeframe, details, longCount, shortC
 
 // ─── Mode: Technical Analyst — vision models, progressive embed ───
 
-async function runTechnical(interaction, timeframe, imageUrl, modelIds) {
+async function runTechnical(interaction, timeframe, imageUrl, modelIds, tradeId) {
   const systemPrompt = technicalPrompt(timeframe);
   const userMsg = `Timeframe: ${timeframe}\n\nAnalyze this chart and give your LONG or SHORT recommendation.`;
 
@@ -577,6 +611,15 @@ async function runTechnical(interaction, timeframe, imageUrl, modelIds) {
     console.error('Chart generation error:', chartErr);
     await interaction.followUp({ content: `Chart generation failed: ${chartErr.message}` });
   }
+
+  if (tradeId) {
+    saveAnalysis(interaction.user.id, {
+      tradeId,
+      mode: 'technical',
+      timeframe,
+      result: { longCount, shortCount, details },
+    });
+  }
 }
 
 // ─── Main command ───
@@ -622,37 +665,59 @@ module.exports = {
     }
 
     if (id === 'llma_bullish') {
+      // Pre-populate from trade context if available
+      const pending = pendingAnalysis.get(interaction.user.id) || {};
+      let prefill = '';
+      let prefillHorizon = '';
+      if (pending.tradeId) {
+        const trade = getTradeByTradeId(interaction.user.id, pending.tradeId);
+        if (trade) {
+          prefill = `${trade.direction} ${trade.asset} @ ${trade.entry} → ${trade.target}. ${trade.emotionReasoning}`.slice(0, 500);
+          prefillHorizon = trade.timeframe;
+        }
+      }
+
+      const assetInput = new TextInputBuilder()
+        .setCustomId('asset')
+        .setLabel('Describe the asset briefly')
+        .setStyle(TextInputStyle.Paragraph)
+        .setPlaceholder('e.g. Ethereum is a smart contract platform with growing DeFi adoption...')
+        .setRequired(true)
+        .setMaxLength(500);
+      if (prefill) assetInput.setValue(prefill);
+
+      const horizonInput = new TextInputBuilder()
+        .setCustomId('horizon')
+        .setLabel('Time horizon (e.g. 3 months, EOY 2026)')
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true);
+      if (prefillHorizon) horizonInput.setValue(prefillHorizon);
+
       const modal = new ModalBuilder()
         .setCustomId('llma_bullish_modal')
         .setTitle('Bullish or Bearish')
         .addComponents(
-          new ActionRowBuilder().addComponents(
-            new TextInputBuilder()
-              .setCustomId('asset')
-              .setLabel('Describe the asset briefly')
-              .setStyle(TextInputStyle.Paragraph)
-              .setPlaceholder('e.g. Ethereum is a smart contract platform with growing DeFi adoption...')
-              .setRequired(true)
-              .setMaxLength(500)
-          ),
-          new ActionRowBuilder().addComponents(
-            new TextInputBuilder()
-              .setCustomId('horizon')
-              .setLabel('Time horizon (e.g. 3 months, EOY 2026)')
-              .setStyle(TextInputStyle.Short)
-              .setRequired(true)
-          ),
+          new ActionRowBuilder().addComponents(assetInput),
+          new ActionRowBuilder().addComponents(horizonInput),
         );
       await interaction.showModal(modal);
 
     } else if (id === 'llma_multival') {
+      const pending = pendingAnalysis.get(interaction.user.id) || {};
+      let prefillAsset = '';
+      if (pending.tradeId) {
+        const trade = getTradeByTradeId(interaction.user.id, pending.tradeId);
+        if (trade) prefillAsset = trade.asset;
+      }
+
+      const assetInput = new TextInputBuilder().setCustomId('asset').setLabel('Asset (e.g. BTC, ETH, AAPL)').setStyle(TextInputStyle.Short).setRequired(true);
+      if (prefillAsset) assetInput.setValue(prefillAsset);
+
       const modal = new ModalBuilder()
         .setCustomId('llma_multival_modal')
         .setTitle('Multi-Valuation')
         .addComponents(
-          new ActionRowBuilder().addComponents(
-            new TextInputBuilder().setCustomId('asset').setLabel('Asset (e.g. BTC, ETH, AAPL)').setStyle(TextInputStyle.Short).setRequired(true)
-          ),
+          new ActionRowBuilder().addComponents(assetInput),
           new ActionRowBuilder().addComponents(
             new TextInputBuilder().setCustomId('target').setLabel('Target (e.g. Q3 2026, EOY 2027)').setStyle(TextInputStyle.Short).setRequired(true)
           ),
@@ -660,13 +725,21 @@ module.exports = {
       await interaction.showModal(modal);
 
     } else if (id === 'llma_soloval') {
+      const pending = pendingAnalysis.get(interaction.user.id) || {};
+      let prefillAsset = '';
+      if (pending.tradeId) {
+        const trade = getTradeByTradeId(interaction.user.id, pending.tradeId);
+        if (trade) prefillAsset = trade.asset;
+      }
+
+      const assetInput = new TextInputBuilder().setCustomId('asset').setLabel('Asset (e.g. BTC, ETH, AAPL)').setStyle(TextInputStyle.Short).setRequired(true);
+      if (prefillAsset) assetInput.setValue(prefillAsset);
+
       const modal = new ModalBuilder()
         .setCustomId('llma_soloval_modal')
         .setTitle('Solo-Valuation')
         .addComponents(
-          new ActionRowBuilder().addComponents(
-            new TextInputBuilder().setCustomId('asset').setLabel('Asset (e.g. BTC, ETH, AAPL)').setStyle(TextInputStyle.Short).setRequired(true)
-          ),
+          new ActionRowBuilder().addComponents(assetInput),
           new ActionRowBuilder().addComponents(
             new TextInputBuilder().setCustomId('target').setLabel('Target (e.g. Q3 2026, EOY 2027)').setStyle(TextInputStyle.Short).setRequired(true)
           ),
@@ -678,7 +751,8 @@ module.exports = {
 
     } else if (id === 'llma_technical') {
       // Show vision model select — screenshot will be uploaded later in channel
-      pendingAnalysis.set(interaction.user.id, { mode: 'technical_select' });
+      const pending = pendingAnalysis.get(interaction.user.id) || {};
+      pendingAnalysis.set(interaction.user.id, { mode: 'technical_select', tradeId: pending.tradeId || null });
       const row = buildModelSelectMenu('llmanalyze_model_select', 8, true);
       await interaction.reply({ content: 'Technical Analyst — Select up to 8 vision-capable models:', components: [row], flags: 64 });
     }
@@ -691,14 +765,17 @@ module.exports = {
     if (id === 'llma_bullish_modal') {
       const asset = interaction.fields.getTextInputValue('asset');
       const horizon = interaction.fields.getTextInputValue('horizon');
+      const existing = pendingAnalysis.get(interaction.user.id) || {};
+      const tradeId = existing.tradeId || null;
+      pendingAnalysis.delete(interaction.user.id);
       await interaction.deferReply();
-      await runBullish(interaction, asset, horizon);
+      await runBullish(interaction, asset, horizon, tradeId);
 
     } else if (id === 'llma_multival_modal') {
       const asset = interaction.fields.getTextInputValue('asset');
       const target = interaction.fields.getTextInputValue('target');
       const existing = pendingAnalysis.get(interaction.user.id) || {};
-      pendingAnalysis.set(interaction.user.id, { ...existing, mode: 'multival', asset, target });
+      pendingAnalysis.set(interaction.user.id, { ...existing, mode: 'multival', asset, target, tradeId: existing.tradeId || null });
       await interaction.deferReply();
       const row = buildModelSelectMenu('llmanalyze_model_select', 8, false);
       await interaction.editReply({ content: `Select up to 8 models for **${asset}** valuation by **${target}**:`, components: [row] });
@@ -709,7 +786,7 @@ module.exports = {
       const runsStr = interaction.fields.getTextInputValue('runs');
       const runs = Math.min(5, Math.max(1, parseInt(runsStr) || 3));
       const existing = pendingAnalysis.get(interaction.user.id) || {};
-      pendingAnalysis.set(interaction.user.id, { ...existing, mode: 'soloval', asset, target, runs });
+      pendingAnalysis.set(interaction.user.id, { ...existing, mode: 'soloval', asset, target, runs, tradeId: existing.tradeId || null });
       await interaction.deferReply();
       const row = buildModelSelectMenu('llmanalyze_model_select', 1, false);
       await interaction.editReply({ content: `Select a model for **${asset}** solo-valuation (${runs} runs) by **${target}**:`, components: [row] });
@@ -722,6 +799,7 @@ module.exports = {
         return;
       }
       const models = existing.models;
+      const tradeId = existing.tradeId || null;
       const modelNames = models.map(mid => getModelById(mid)?.name || mid).join(', ');
       pendingAnalysis.delete(interaction.user.id);
 
@@ -756,7 +834,7 @@ module.exports = {
       }
 
       try {
-        await runTechnical(interaction, timeframe, imageUrl, models);
+        await runTechnical(interaction, timeframe, imageUrl, models, tradeId);
       } catch (err) {
         console.error('Technical Analyst error:', err);
         const errorEmbed = new EmbedBuilder()
@@ -781,7 +859,7 @@ module.exports = {
 
     // Technical flow: show timeframe modal (don't defer — modals must be immediate)
     if (pending.mode === 'technical_select') {
-      pendingAnalysis.set(userId, { ...pending, mode: 'technical_ready', models: selectedModels });
+      pendingAnalysis.set(userId, { ...pending, mode: 'technical_ready', models: selectedModels, tradeId: pending.tradeId || null });
       const modal = new ModalBuilder()
         .setCustomId('llma_technical_modal')
         .setTitle('Technical Analyst')
@@ -799,10 +877,49 @@ module.exports = {
     await interaction.deferUpdate();
 
     if (pending.mode === 'multival') {
-      await runMultiVal(interaction, pending.asset, pending.target, selectedModels);
+      await runMultiVal(interaction, pending.asset, pending.target, selectedModels, pending.tradeId);
     } else if (pending.mode === 'soloval') {
-      await runSoloVal(interaction, pending.asset, pending.target, selectedModels[0], pending.runs);
+      await runSoloVal(interaction, pending.asset, pending.target, selectedModels[0], pending.runs, pending.tradeId);
     }
+  },
+
+  // Handle "Run LLM Analysis" button from a trade ticket
+  async handleTradeButton(interaction) {
+    const tradeId = interaction.customId.replace('trade_llma_', '');
+    const userId = interaction.user.id;
+    const trade = getTradeByTradeId(userId, tradeId);
+
+    if (!trade) {
+      await interaction.reply({ content: 'Trade not found. You can only analyze your own trades.', flags: 64 });
+      return;
+    }
+
+    // Store tradeId in pendingAnalysis so it flows through the entire analysis pipeline
+    pendingAnalysis.set(userId, { tradeId });
+
+    // Build asset description from trade context for pre-population
+    const assetDesc = `${trade.asset} — ${trade.direction} @ ${trade.entry} → ${trade.target} (${trade.timeframe})`;
+
+    const embed = new EmbedBuilder()
+      .setTitle('LLM Analysis — Trade Linked')
+      .setColor(0x3b82f6)
+      .setDescription(
+        `**Trade #${trade.id}:** ${trade.direction} ${trade.asset} @ ${trade.entry} → ${trade.target}\n\n` +
+        'Pick an analysis mode:\n\n' +
+        '**A) Bullish or Bearish** — All 18 models vote on your thesis.\n' +
+        '**B) Multi-Valuation** — Up to 8 models estimate market cap.\n' +
+        '**C) Solo-Valuation** — 1 model, multiple runs for consistency.\n' +
+        '**D) Technical Analyst** — Vision models analyze a chart screenshot.'
+      );
+
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('llma_bullish').setLabel('A) Bullish or Bearish').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('llma_multival').setLabel('B) Multi-Valuation').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('llma_soloval').setLabel('C) Solo-Valuation').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('llma_technical').setLabel('D) Technical Analyst').setStyle(ButtonStyle.Danger),
+    );
+
+    await interaction.reply({ embeds: [embed], components: [row], flags: 64 });
   },
 
   pendingAnalysis,

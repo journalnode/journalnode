@@ -279,7 +279,19 @@ client.on('interactionCreate', async (interaction) => {
 
   // Handle button interactions (mode selection for /llmanalyze)
   if (interaction.isButton()) {
-    if (interaction.customId.startsWith('llma_')) {
+    if (interaction.customId.startsWith('trade_llma_')) {
+      try {
+        await analyzeCmd.handleTradeButton(interaction);
+      } catch (err) {
+        console.error('[trade_llma] Button handler failed:', err);
+        const errorMsg = 'Something went wrong. Please try again.';
+        if (interaction.deferred || interaction.replied) {
+          await interaction.followUp({ content: errorMsg, flags: 64 }).catch(() => {});
+        } else {
+          await interaction.reply({ content: errorMsg, flags: 64 }).catch(() => {});
+        }
+      }
+    } else if (interaction.customId.startsWith('llma_')) {
       try {
         await analyzeCmd.handleButton(interaction);
       } catch (err) {
