@@ -38,6 +38,8 @@ const onboardCmd = require('./commands/onboard');
 commands.set(onboardCmd.name, onboardCmd);
 const tradeCmd = require('./commands/trade');
 commands.set(tradeCmd.name, tradeCmd);
+const mytradesCmd = require('./commands/mytrades');
+commands.set(mytradesCmd.name, mytradesCmd);
 const menuCmd = require('./commands/menu');
 commands.set(menuCmd.name, menuCmd);
 const analyzeCmd = require('./commands/analyze');
@@ -198,6 +200,12 @@ const tradeBuilder = new SlashCommandBuilder()
     .setRequired(false));
 slashCommands.push(tradeBuilder.toJSON());
 
+// /mytrades: no options needed
+const mytradesBuilder = new SlashCommandBuilder()
+  .setName('mytrades')
+  .setDescription(mytradesCmd.description);
+slashCommands.push(mytradesBuilder.toJSON());
+
 // /menu: no options needed
 const menuBuilder = new SlashCommandBuilder()
   .setName('menu')
@@ -227,7 +235,7 @@ client.once('clientReady', async () => {
   try {
     console.log('Registering slash commands...');
     await rest.put(Routes.applicationCommands(client.user.id), { body: slashCommands });
-    const allNames = [...analysisCommands, 'chat', 'postfiat', 'wallets', 'send', 'balance', 'mint', 'gallery', 'receive', 'onboard', 'trade', 'menu', 'llmanalyze'].map(c => `/${c}`).join(', ');
+    const allNames = [...analysisCommands, 'chat', 'postfiat', 'wallets', 'send', 'balance', 'mint', 'gallery', 'receive', 'onboard', 'trade', 'mytrades', 'menu', 'llmanalyze'].map(c => `/${c}`).join(', ');
     console.log(`Registered ${slashCommands.length} slash commands: ${allNames}`);
   } catch (err) {
     console.error('Failed to register slash commands:', err);
@@ -261,6 +269,18 @@ client.on('interactionCreate', async (interaction) => {
           await interaction.reply({ content: errorMsg, flags: 64 }).catch(() => {});
         }
       }
+    } else if (interaction.customId.startsWith('close_trade_modal_')) {
+      try {
+        await mytradesCmd.handleCloseSubmit(interaction);
+      } catch (err) {
+        console.error('[/mytrades] Close trade modal failed:', err);
+        const errorMsg = 'Something went wrong closing your trade. Please try again.';
+        if (interaction.deferred || interaction.replied) {
+          await interaction.followUp(errorMsg).catch(() => {});
+        } else {
+          await interaction.reply({ content: errorMsg, flags: 64 }).catch(() => {});
+        }
+      }
     } else if (interaction.customId.startsWith('llma_') && interaction.customId.endsWith('_modal')) {
       try {
         await analyzeCmd.handleModalSubmit(interaction);
@@ -277,9 +297,21 @@ client.on('interactionCreate', async (interaction) => {
     return;
   }
 
-  // Handle button interactions (mode selection for /llmanalyze)
+  // Handle button interactions
   if (interaction.isButton()) {
-    if (interaction.customId.startsWith('trade_llma_')) {
+    if (interaction.customId.startsWith('close_trade_')) {
+      try {
+        await mytradesCmd.handleCloseButton(interaction);
+      } catch (err) {
+        console.error('[/mytrades] Close button failed:', err);
+        const errorMsg = 'Something went wrong. Please try again.';
+        if (interaction.deferred || interaction.replied) {
+          await interaction.followUp({ content: errorMsg, flags: 64 }).catch(() => {});
+        } else {
+          await interaction.reply({ content: errorMsg, flags: 64 }).catch(() => {});
+        }
+      }
+    } else if (interaction.customId.startsWith('trade_llma_')) {
       try {
         await analyzeCmd.handleTradeButton(interaction);
       } catch (err) {

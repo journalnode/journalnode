@@ -48,4 +48,26 @@ function getTradeByTradeId(userId, tradeId) {
   return trades.find(t => t.tradeId === tradeId) || null;
 }
 
-module.exports = { addTrade, getUserTrades, getTradeByTradeId };
+function getOpenTrades(userId) {
+  const trades = getUserTrades(userId);
+  return trades.filter(t => t.status !== 'closed');
+}
+
+function closeTrade(userId, tradeId, closeData) {
+  const store = loadStore();
+  const trades = store[userId] || [];
+  const trade = trades.find(t => t.tradeId === tradeId);
+  if (!trade) return null;
+
+  trade.status = 'closed';
+  trade.outcome = closeData.outcome;
+  trade.exitPrice = closeData.exitPrice || null;
+  trade.reflection = closeData.reflection;
+  trade.closeScreenshotUrl = closeData.closeScreenshotUrl || null;
+  trade.closedAt = new Date().toISOString();
+
+  saveStore(store);
+  return trade;
+}
+
+module.exports = { addTrade, getUserTrades, getTradeByTradeId, getOpenTrades, closeTrade };
