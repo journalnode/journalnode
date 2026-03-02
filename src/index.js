@@ -13,11 +13,6 @@ if (!DISCORD_TOKEN) {
 
 // Load commands
 const commands = new Map();
-const analysisCommands = ['insight', 'rhythm', 'cadence', 'mood', 'length', 'focus', 'topics', 'questions', 'vocab'];
-for (const file of analysisCommands) {
-  const cmd = require(`./commands/${file}`);
-  commands.set(cmd.name, cmd);
-}
 const chatCmd = require('./commands/chat');
 commands.set(chatCmd.name, chatCmd);
 const postfiatCmd = require('./commands/postfiat');
@@ -60,16 +55,6 @@ function addTimeframeOption(builder) {
 }
 
 const slashCommands = [];
-
-// Analysis commands: name + description + timeframe option
-for (const file of analysisCommands) {
-  const cmd = require(`./commands/${file}`);
-  const builder = new SlashCommandBuilder()
-    .setName(cmd.name)
-    .setDescription(cmd.description);
-  addTimeframeOption(builder);
-  slashCommands.push(builder.toJSON());
-}
 
 // /chat: message (required) + timeframe option
 const chatBuilder = new SlashCommandBuilder()
@@ -235,7 +220,7 @@ client.once('clientReady', async () => {
   try {
     console.log('Registering slash commands...');
     await rest.put(Routes.applicationCommands(client.user.id), { body: slashCommands });
-    const allNames = [...analysisCommands, 'chat', 'postfiat', 'wallets', 'send', 'balance', 'mint', 'gallery', 'receive', 'onboard', 'trade', 'mytrades', 'menu', 'llmanalyze'].map(c => `/${c}`).join(', ');
+    const allNames = ['chat', 'postfiat', 'wallets', 'send', 'balance', 'mint', 'gallery', 'receive', 'onboard', 'trade', 'mytrades', 'menu', 'llmanalyze'].map(c => `/${c}`).join(', ');
     console.log(`Registered ${slashCommands.length} slash commands: ${allNames}`);
   } catch (err) {
     console.error('Failed to register slash commands:', err);
@@ -418,16 +403,17 @@ client.on('messageCreate', async (message) => {
     await message.channel.sendTyping();
 
     const allEntries = await fetchJournalEntries(message.channel, client.user.id);
-    if (allEntries.length === 0) {
-      await message.reply('No journal entries found yet. Write some entries first, then come back.');
-      return;
-    }
 
-    const stats = summarizeStats(allEntries);
-    const formatted = formatEntries(allEntries);
-    const purposeData = getUserPurpose(message.author.id);
-    const purposeStr = purposeData ? `\n\nThe user's stated journal purpose/goal: "${purposeData.purpose}"\nKeep this goal in mind when analyzing their entries — reference their progress toward it when relevant.` : '';
-    const context = `Context window: all time\nJournal summary: ${stats}${purposeStr}\n\nJournal entries:\n\n${formatted}\n\n---\nUser's message: ${userText}`;
+    let context;
+    if (allEntries.length === 0) {
+      context = `No journal entries found yet.\n\n---\nUser's message: ${userText}`;
+    } else {
+      const stats = summarizeStats(allEntries);
+      const formatted = formatEntries(allEntries);
+      const purposeData = getUserPurpose(message.author.id);
+      const purposeStr = purposeData ? `\n\nThe user's stated journal purpose/goal: "${purposeData.purpose}"\nKeep this goal in mind when analyzing their entries — reference their progress toward it when relevant.` : '';
+      context = `Context window: all time\nJournal summary: ${stats}${purposeStr}\n\nJournal entries:\n\n${formatted}\n\n---\nUser's message: ${userText}`;
+    }
     const reply = await llmChat(chatCmd.SYSTEM_PROMPT, context);
 
     if (reply.length <= 2000) {
