@@ -3,8 +3,134 @@ const { callModel } = require('../openrouter');
 const { MODELS, getModelById, getVisionModels } = require('../models');
 const { getTradeByTradeId } = require('../tradeStore');
 const { saveAnalysis } = require('../analysisStore');
+const { sendPFT, getBalance } = require('../wallet');
+const { getActiveWallet, getWalletSeed } = require('../walletStore');
 
 const pendingAnalysis = new Map();
+
+// ─── PFT Micro-Payment Constants ───
+
+const JOURNAL_NODE_WALLET = 'rLnrtLSQdtmWgTiY3o6NNWKpb43RsvZ1yW';
+const LLM_FEE_PFT = '1';
+const PFT_EXPLORER = 'https://explorer.testnet.postfiat.org/transactions';
+
+// ─── Payment Collection ───
+
+async function collectPayment(interaction, modeName) {
+  const userId = interaction.user.id;
+
+  const active = getActiveWallet(userId);
+  if (!active) {
+    const embed = new EmbedBuilder()
+      .setTitle('Wallet Required')
+      .setColor(0xef4444)
+      .setDescription(
+        'You need an active wallet to use LLM analysis.\n' +
+        'Use `/postfiat` to create one, or `/wallets import` to import an existing wallet.'
+      );
+    await interaction.editReply({ embeds: [embed], components: [] });
+    return null;
+  }
+
+  const balance = await getBalance(active.address);
+  if (balance === null || parseFloat(balance) < parseFloat(LLM_FEE_PFT)) {
+    const embed = new EmbedBuilder()
+      .setTitle('Insufficient Balance')
+      .setColor(0xef4444)
+      .setDescription(
+        `You need at least **${LLM_FEE_PFT} PFT** to run this analysis.\n\n` +
+        `**Your balance:** ${balance ?? '0 (not activated)'} PFT\n` +
+        `**Wallet:** \`${active.address}\``
+      );
+    await interaction.editReply({ embeds: [embed], components: [] });
+    return null;
+  }
+
+  const memo = `Journal Node - ${modeName}`;
+
+  const confirmEmbed = new EmbedBuilder()
+    .setTitle('LLM Analysis — Payment Required')
+    .setColor(0xf59e0b)
+    .setDescription(
+      `**Mode:** ${modeName}\n` +
+      `**Fee:** ${LLM_FEE_PFT} PFT\n` +
+      `**From:** \`${active.address}\`\n` +
+      `**To:** \`${JOURNAL_NODE_WALLET}\`\n` +
+      `**Memo:** ${memo}\n` +
+      `**Your Balance:** ${balance} PFT\n\n` +
+      'Click **Confirm & Pay** to proceed with the analysis.'
+    );
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('llma_pay_confirm').setLabel(`Confirm & Pay ${LLM_FEE_PFT} PFT`).setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId('llma_pay_cancel').setLabel('Cancel').setStyle(ButtonStyle.Secondary),
+  );
+
+  await interaction.editReply({ embeds: [confirmEmbed], components: [row] });
+
+  let btnInteraction;
+  try {
+    const msg = await interaction.fetchReply();
+    btnInteraction = await msg.awaitMessageComponent({
+      filter: (i) => i.user.id === userId && (i.customId === 'llma_pay_confirm' || i.customId === 'llma_pay_cancel'),
+      time: 60000,
+    });
+  } catch {
+    const timeoutEmbed = new EmbedBuilder()
+      .setTitle('Payment Timed Out')
+      .setColor(0xef4444)
+      .setDescription('Payment confirmation timed out. Run `/llmanalyze` again to start over.');
+    await interaction.editReply({ embeds: [timeoutEmbed], components: [] });
+    return null;
+  }
+
+  if (btnInteraction.customId === 'llma_pay_cancel') {
+    await btnInteraction.update({
+      embeds: [new EmbedBuilder().setTitle('Analysis Cancelled').setColor(0x6b7280).setDescription('Payment was cancelled.')],
+      components: [],
+    });
+    return null;
+  }
+
+  await btnInteraction.update({
+    embeds: [new EmbedBuilder().setTitle('Processing Payment...').setColor(0xf59e0b).setDescription(`Sending ${LLM_FEE_PFT} PFT to Journal Node wallet...`)],
+    components: [],
+  });
+
+  try {
+    const seed = getWalletSeed(userId, active.address);
+    if (!seed) {
+      await interaction.editReply({
+        embeds: [new EmbedBuilder().setTitle('Wallet Error').setColor(0xef4444).setDescription('Could not retrieve your wallet credentials. Try `/wallets set-active` to reset.')],
+      });
+      return null;
+    }
+
+    const result = await sendPFT(seed, JOURNAL_NODE_WALLET, LLM_FEE_PFT, memo);
+    const txUrl = `${PFT_EXPLORER}/${result.txHash}`;
+
+    const confirmedEmbed = new EmbedBuilder()
+      .setTitle('Payment Confirmed')
+      .setColor(0x22c55e)
+      .setDescription(
+        `**Amount:** ${LLM_FEE_PFT} PFT\n` +
+        `**From:** \`${result.from}\`\n` +
+        `**To:** \`${result.to}\`\n` +
+        `**Memo:** ${memo}\n` +
+        `**Transaction:** [View on Explorer](${txUrl})\n\n` +
+        `Starting **${modeName}** analysis...`
+      );
+    await interaction.followUp({ embeds: [confirmedEmbed] });
+
+    return { txHash: result.txHash, from: result.from, txUrl };
+  } catch (err) {
+    console.error(`[llmanalyze] Payment failed:`, err.message);
+    await interaction.editReply({
+      embeds: [new EmbedBuilder().setTitle('Payment Failed').setColor(0xef4444).setDescription(`Transaction failed: ${err.message}\n\nPlease try again.`)],
+    });
+    return null;
+  }
+}
 
 // ─── Chart helpers via QuickChart.io ───
 
@@ -154,7 +280,7 @@ function extractExplanation(response) {
 
 // ─── Mode: Bullish or Bearish — all 18 models, progressive embed ───
 
-async function runBullish(interaction, assetDescription, horizon, tradeId) {
+async function runBullish(interaction, assetDescription, horizon, tradeId, paymentTx) {
   const systemPrompt = bullishPrompt(assetDescription, horizon);
   const userMsg = `${assetDescription}\n\nTime horizon: ${horizon}\n\nAre you bullish or bearish?`;
 
@@ -170,6 +296,7 @@ async function runBullish(interaction, assetDescription, horizon, tradeId) {
 
     let desc = `**User Query:** ${assetDescription.slice(0, 200)}${assetDescription.length > 200 ? '...' : ''}\n`;
     desc += `**Horizon:** ${horizon}\n`;
+    if (paymentTx) desc += `**Payment:** [View TX](${paymentTx.txUrl}) (${LLM_FEE_PFT} PFT)\n`;
 
     if (complete) {
       desc += `**Result:** ${bullishCount} Bullish / ${bearishCount} Bearish${unclear > 0 ? ` / ${unclear} Unclear` : ''}\n`;
@@ -239,7 +366,7 @@ async function runBullish(interaction, assetDescription, horizon, tradeId) {
 
 // ─── Mode: Multi-Valuation — up to 8 models, progressive embed ───
 
-async function runMultiVal(interaction, asset, target, modelIds, tradeId) {
+async function runMultiVal(interaction, asset, target, modelIds, tradeId, paymentTx) {
   const systemPrompt = valuationPrompt(asset, target);
   const userMsg = `Asset: ${asset}\nTarget: ${target}\n\nWhat is your market cap estimate?`;
 
@@ -251,6 +378,7 @@ async function runMultiVal(interaction, asset, target, modelIds, tradeId) {
       .setColor(0x6366f1);
 
     let desc = `**Asset:** ${asset}\n**Target:** ${target}\n`;
+    if (paymentTx) desc += `**Payment:** [View TX](${paymentTx.txUrl}) (${LLM_FEE_PFT} PFT)\n`;
 
     if (complete) {
       const validValues = details.filter(d => d.value).map(d => d.value);
@@ -322,7 +450,7 @@ async function runMultiVal(interaction, asset, target, modelIds, tradeId) {
 
 // ─── Mode: Solo-Valuation — 1 model, N runs, progressive embed ───
 
-async function runSoloVal(interaction, asset, target, modelId, runs, tradeId) {
+async function runSoloVal(interaction, asset, target, modelId, runs, tradeId, paymentTx) {
   const model = getModelById(modelId);
   const modelName = model?.name || modelId;
   const systemPrompt = valuationPrompt(asset, target);
@@ -336,6 +464,7 @@ async function runSoloVal(interaction, asset, target, modelId, runs, tradeId) {
       .setColor(0x6366f1);
 
     let desc = `**Asset:** ${asset}\n**Target:** ${target}\n**Model:** ${modelName}\n`;
+    if (paymentTx) desc += `**Payment:** [View TX](${paymentTx.txUrl}) (${LLM_FEE_PFT} PFT)\n`;
 
     if (complete && runResults.length > 0) {
       desc += `**Mean:** ${formatNum(mean)} | **Median:** ${formatNum(median)}\n`;
@@ -525,7 +654,7 @@ async function buildCombinedTechnicalChart(timeframe, details, longCount, shortC
 
 // ─── Mode: Technical Analyst — vision models, progressive embed ───
 
-async function runTechnical(interaction, timeframe, imageUrl, modelIds, tradeId) {
+async function runTechnical(interaction, timeframe, imageUrl, modelIds, tradeId, paymentTx) {
   const systemPrompt = technicalPrompt(timeframe);
   const userMsg = `Timeframe: ${timeframe}\n\nAnalyze this chart and give your LONG or SHORT recommendation.`;
 
@@ -541,6 +670,7 @@ async function runTechnical(interaction, timeframe, imageUrl, modelIds, tradeId)
       .setColor(0xef4444);
 
     let desc = '';
+    if (paymentTx) desc += `**Payment:** [View TX](${paymentTx.txUrl}) (${LLM_FEE_PFT} PFT)\n`;
 
     if (complete) {
       const total = longCount + shortCount;
@@ -633,7 +763,7 @@ module.exports = {
     const embed = new EmbedBuilder()
       .setTitle('LLM Market Analyzer')
       .setDescription(
-        'Pick a mode:\n\n' +
+        'Pick a mode (each analysis costs **1 PFT**):\n\n' +
         '**A) Bullish or Bearish** — Pitch an asset to all 18 models. Pie chart.\n' +
         '**B) Multi-Valuation** — Pick up to 8 models for market cap estimates. Bar chart.\n' +
         '**C) Solo-Valuation** — Run 1 model up to 5 times to test consistency. Bar chart.\n' +
@@ -654,6 +784,9 @@ module.exports = {
   // Handle button clicks
   async handleButton(interaction) {
     const id = interaction.customId;
+
+    // Payment buttons are handled by collectPayment's awaitMessageComponent
+    if (id === 'llma_pay_confirm' || id === 'llma_pay_cancel') return;
 
     if (id === 'llma_info') {
       const modelList = MODELS.map((m, i) => `${i + 1}. **${m.name}** — \`${m.id}\`${m.vision ? ' 👁' : ''}`).join('\n');
@@ -769,7 +902,11 @@ module.exports = {
       const tradeId = existing.tradeId || null;
       pendingAnalysis.delete(interaction.user.id);
       await interaction.deferReply();
-      await runBullish(interaction, asset, horizon, tradeId);
+
+      const paymentTx = await collectPayment(interaction, 'Bullish or Bearish');
+      if (!paymentTx) return;
+
+      await runBullish(interaction, asset, horizon, tradeId, paymentTx);
 
     } else if (id === 'llma_multival_modal') {
       const asset = interaction.fields.getTextInputValue('asset');
@@ -833,8 +970,11 @@ module.exports = {
         return;
       }
 
+      const paymentTx = await collectPayment(interaction, 'Technical Analyst');
+      if (!paymentTx) return;
+
       try {
-        await runTechnical(interaction, timeframe, imageUrl, models, tradeId);
+        await runTechnical(interaction, timeframe, imageUrl, models, tradeId, paymentTx);
       } catch (err) {
         console.error('Technical Analyst error:', err);
         const errorEmbed = new EmbedBuilder()
@@ -877,9 +1017,13 @@ module.exports = {
     await interaction.deferUpdate();
 
     if (pending.mode === 'multival') {
-      await runMultiVal(interaction, pending.asset, pending.target, selectedModels, pending.tradeId);
+      const paymentTx = await collectPayment(interaction, 'Multi-Valuation');
+      if (!paymentTx) return;
+      await runMultiVal(interaction, pending.asset, pending.target, selectedModels, pending.tradeId, paymentTx);
     } else if (pending.mode === 'soloval') {
-      await runSoloVal(interaction, pending.asset, pending.target, selectedModels[0], pending.runs, pending.tradeId);
+      const paymentTx = await collectPayment(interaction, 'Solo-Valuation');
+      if (!paymentTx) return;
+      await runSoloVal(interaction, pending.asset, pending.target, selectedModels[0], pending.runs, pending.tradeId, paymentTx);
     }
   },
 
@@ -905,7 +1049,7 @@ module.exports = {
       .setColor(0x3b82f6)
       .setDescription(
         `**Trade #${trade.id}:** ${trade.direction} ${trade.asset} @ ${trade.entry} → ${trade.target}\n\n` +
-        'Pick an analysis mode:\n\n' +
+        'Pick an analysis mode (each analysis costs **1 PFT**):\n\n' +
         '**A) Bullish or Bearish** — All 18 models vote on your thesis.\n' +
         '**B) Multi-Valuation** — Up to 8 models estimate market cap.\n' +
         '**C) Solo-Valuation** — 1 model, multiple runs for consistency.\n' +
