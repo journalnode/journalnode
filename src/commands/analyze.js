@@ -134,16 +134,29 @@ async function collectPayment(interaction, modeName) {
 
 // ─── B.O.B. Thesis Ingestion ───
 
-const BOB_USERNAME = '__jollyadvisorbot__';
+const BOB_USERNAME = 'jollyadvisorbot';
+
+function getBobText(msg) {
+  // B.O.B. may post thesis as plain content or inside an embed
+  if (msg.content && msg.content.length > 200) return msg.content;
+  if (msg.embeds?.length > 0) {
+    for (const embed of msg.embeds) {
+      const text = [embed.title, embed.description, ...(embed.fields || []).map(f => `${f.name}\n${f.value}`)].filter(Boolean).join('\n');
+      if (text.length > 200) return text;
+    }
+  }
+  return null;
+}
 
 async function findBobThesis(channel) {
   const messages = await channel.messages.fetch({ limit: 100 });
-  // Find latest thesis from B.O.B. — must be substantial (not just "Generating thesis...")
-  const thesis = messages.find(msg =>
-    msg.author.username === BOB_USERNAME &&
-    msg.content.includes('Thesis') &&
-    msg.content.length > 200
-  );
+  // Find latest thesis from B.O.B. — check username and bot status
+  const thesis = messages.find(msg => {
+    if (msg.author.username !== BOB_USERNAME) return false;
+    const text = getBobText(msg);
+    if (!text) return false;
+    return /thesis/i.test(text);
+  });
   return thesis || null;
 }
 
@@ -978,12 +991,13 @@ module.exports = {
       await interaction.editReply({ embeds: [parsingEmbed] });
 
       try {
-        const parsed = await parseBobThesis(thesisMsg.content);
-        const dateMatch = thesisMsg.content.match(/(?:Daily\s+)?Thesis\s*[—–\-]\s*(.+?)(?:\n|\*)/i);
+        const thesisText = getBobText(thesisMsg);
+        const parsed = await parseBobThesis(thesisText);
+        const dateMatch = thesisText.match(/(?:Daily\s+)?Thesis\s*[—–\-]\s*(.+?)(?:\n|\*)/i);
         const thesisDate = dateMatch ? dateMatch[1].trim() : thesisMsg.createdAt.toLocaleDateString('en-US', { dateStyle: 'medium' });
 
         pendingAnalysis.set(interaction.user.id, {
-          bobThesis: { ...parsed, fullText: thesisMsg.content, messageId: thesisMsg.id },
+          bobThesis: { ...parsed, fullText: thesisText, messageId: thesisMsg.id },
           bobThesisDate: thesisDate,
         });
 
