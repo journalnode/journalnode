@@ -39,6 +39,8 @@ const menuCmd = require('./commands/menu');
 commands.set(menuCmd.name, menuCmd);
 const analyzeCmd = require('./commands/analyze');
 commands.set(analyzeCmd.name, analyzeCmd);
+const faqCmd = require('./commands/faq');
+commands.set(faqCmd.name, faqCmd);
 
 const { chat: llmChat } = require('./openrouter');
 const { formatEntries, summarizeStats, sendLong } = require('./commands/helpers');
@@ -203,6 +205,12 @@ const analyzeBuilder = new SlashCommandBuilder()
   .setDescription(analyzeCmd.description);
 slashCommands.push(analyzeBuilder.toJSON());
 
+// /faq: no options needed
+const faqBuilder = new SlashCommandBuilder()
+  .setName('faq')
+  .setDescription(faqCmd.description);
+slashCommands.push(faqBuilder.toJSON());
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -220,7 +228,7 @@ client.once('clientReady', async () => {
   try {
     console.log('Registering slash commands...');
     await rest.put(Routes.applicationCommands(client.user.id), { body: slashCommands });
-    const allNames = ['chat', 'postfiat', 'wallets', 'send', 'balance', 'mint', 'gallery', 'receive', 'onboard', 'trade', 'mytrades', 'menu', 'llmanalyze'].map(c => `/${c}`).join(', ');
+    const allNames = ['chat', 'postfiat', 'wallets', 'send', 'balance', 'mint', 'gallery', 'receive', 'onboard', 'trade', 'mytrades', 'menu', 'llmanalyze', 'faq'].map(c => `/${c}`).join(', ');
     console.log(`Registered ${slashCommands.length} slash commands: ${allNames}`);
   } catch (err) {
     console.error('Failed to register slash commands:', err);
@@ -320,6 +328,18 @@ client.on('interactionCreate', async (interaction) => {
           await interaction.reply({ content: errorMsg, flags: 64 }).catch(() => {});
         }
       }
+    } else if (interaction.customId.startsWith('faq_')) {
+      try {
+        await faqCmd.handleButton(interaction);
+      } catch (err) {
+        console.error('[/faq] Button handler failed:', err);
+        const errorMsg = 'Something went wrong. Please try `/faq` again.';
+        if (interaction.deferred || interaction.replied) {
+          await interaction.followUp({ content: errorMsg, flags: 64 }).catch(() => {});
+        } else {
+          await interaction.reply({ content: errorMsg, flags: 64 }).catch(() => {});
+        }
+      }
     }
     return;
   }
@@ -403,17 +423,12 @@ client.on('messageCreate', async (message) => {
     await message.channel.sendTyping();
 
     const allEntries = await fetchJournalEntries(message.channel, client.user.id);
-
-    let context;
-    if (allEntries.length === 0) {
-      context = `No journal entries found yet.\n\n---\nUser's message: ${userText}`;
-    } else {
-      const stats = summarizeStats(allEntries);
-      const formatted = formatEntries(allEntries);
-      const purposeData = getUserPurpose(message.author.id);
-      const purposeStr = purposeData ? `\n\nThe user's stated journal purpose/goal: "${purposeData.purpose}"\nKeep this goal in mind when analyzing their entries — reference their progress toward it when relevant.` : '';
-      context = `Context window: all time\nJournal summary: ${stats}${purposeStr}\n\nJournal entries:\n\n${formatted}\n\n---\nUser's message: ${userText}`;
-    }
+    const stats = allEntries.length > 0 ? summarizeStats(allEntries) : 'No journal entries yet.';
+    const formatted = allEntries.length > 0 ? formatEntries(allEntries) : '';
+    const purposeData = getUserPurpose(message.author.id);
+    const purposeStr = purposeData ? `\n\nThe user's stated journal purpose/goal: "${purposeData.purpose}"\nKeep this goal in mind when analyzing their entries — reference their progress toward it when relevant.` : '';
+    const entriesBlock = formatted ? `\n\nJournal entries:\n\n${formatted}` : '';
+    const context = `Context window: all time\nJournal summary: ${stats}${purposeStr}${entriesBlock}\n\n---\nUser's message: ${userText}`;
     const reply = await llmChat(chatCmd.SYSTEM_PROMPT, context);
 
     if (reply.length <= 2000) {

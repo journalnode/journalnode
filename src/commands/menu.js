@@ -25,6 +25,7 @@ module.exports = {
       '**━━━ Other ━━━**',
       '`/chat` — Talk to Journal Node AI.',
       '`! message` — Prefix command for chat.',
+      '`/faq` — Frequently asked questions.',
     ];
 
     const full = lines.join('\n');
