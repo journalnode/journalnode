@@ -1,7 +1,7 @@
 const { StringSelectMenuBuilder, ActionRowBuilder, AttachmentBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
-const { callModel } = require('../openrouter');
+const { callModel, chat: llmChat } = require('../openrouter');
 const { MODELS, getModelById, getVisionModels } = require('../models');
-const { getTradeByTradeId } = require('../tradeStore');
+const { getTradeByTradeId, addTrade } = require('../tradeStore');
 const { saveAnalysis } = require('../analysisStore');
 const { sendPFT, getBalance } = require('../wallet');
 const { getActiveWallet, getWalletSeed } = require('../walletStore');
@@ -130,6 +130,63 @@ async function collectPayment(interaction, modeName) {
     });
     return null;
   }
+}
+
+// ─── B.O.B. Thesis Ingestion ───
+
+const BOB_USERNAME = '__jollyadvisorbot__';
+
+async function findBobThesis(channel) {
+  const messages = await channel.messages.fetch({ limit: 100 });
+  // Find latest thesis from B.O.B. — must be substantial (not just "Generating thesis...")
+  const thesis = messages.find(msg =>
+    msg.author.username === BOB_USERNAME &&
+    msg.content.includes('Thesis') &&
+    msg.content.length > 200
+  );
+  return thesis || null;
+}
+
+async function parseBobThesis(thesisContent) {
+  const prompt = `You are a trading thesis parser. Extract structured fields from the thesis below. Respond with ONLY valid JSON, no markdown fences, no other text.
+
+Required JSON format:
+{"asset":"primary asset or sector","direction":"LONG or SHORT","confidence":"HIGH, MEDIUM, or LOW","timeframe":"investment timeframe or Not specified","summary":"1-2 sentence thesis summary"}`;
+
+  const response = await llmChat(prompt, thesisContent);
+  const jsonMatch = response.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) throw new Error('Could not extract structured data from thesis');
+  return JSON.parse(jsonMatch[0]);
+}
+
+function buildBobPanel(parsed, thesisDate) {
+  const dirEmoji = parsed.direction === 'SHORT' ? '📉' : '📈';
+  const embed = new EmbedBuilder()
+    .setTitle('B.O.B. Thesis — Ingestion Confirmed')
+    .setColor(0x3b82f6)
+    .setDescription(
+      `**Date:** ${thesisDate}\n` +
+      `**Asset:** ${parsed.asset}\n` +
+      `**Direction:** ${dirEmoji} ${parsed.direction}\n` +
+      `**Confidence:** ${parsed.confidence}\n` +
+      `**Timeframe:** ${parsed.timeframe || 'Not specified'}\n\n` +
+      `**Summary:** ${parsed.summary}\n\n` +
+      'Run the thesis through LLM analysis, view the full ingestion, or create a trade ticket:'
+    );
+
+  const row1 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('llma_bob_bb').setLabel('A) Bullish/Bearish').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('llma_bob_mv').setLabel('B) Multi-Val').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId('llma_bob_sv').setLabel('C) Solo-Val').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('llma_bob_ta').setLabel('D) Technical').setStyle(ButtonStyle.Danger),
+  );
+
+  const row2 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('llma_bob_view').setLabel('View Full Thesis').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('llma_bob_trade').setLabel('Create Trade Ticket').setStyle(ButtonStyle.Primary),
+  );
+
+  return { embeds: [embed], components: [row1, row2] };
 }
 
 // ─── Chart helpers via QuickChart.io ───
@@ -767,7 +824,8 @@ module.exports = {
         '**A) Bullish or Bearish** — Pitch an asset to all 18 models. Pie chart.\n' +
         '**B) Multi-Valuation** — Pick up to 8 models for market cap estimates. Bar chart.\n' +
         '**C) Solo-Valuation** — Run 1 model up to 5 times to test consistency. Bar chart.\n' +
-        '**D) Technical Analyst** — Vision models analyze your chart screenshot. Long/Short.'
+        '**D) Technical Analyst** — Vision models analyze your chart screenshot. Long/Short.\n' +
+        '**E) B.O.B. Thesis** — Ingest the latest B.O.B. trading thesis for analysis.'
       );
 
     const row1 = new ActionRowBuilder().addComponents(
@@ -775,10 +833,14 @@ module.exports = {
       new ButtonBuilder().setCustomId('llma_multival').setLabel('B) Multi-Valuation').setStyle(ButtonStyle.Success),
       new ButtonBuilder().setCustomId('llma_soloval').setLabel('C) Solo-Valuation').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('llma_technical').setLabel('D) Technical Analyst').setStyle(ButtonStyle.Danger),
+    );
+
+    const row2 = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('llma_bob').setLabel('E) B.O.B. Thesis').setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId('llma_info').setLabel('?').setStyle(ButtonStyle.Primary),
     );
 
-    await interaction.editReply({ embeds: [embed], components: [row1] });
+    await interaction.editReply({ embeds: [embed], components: [row1, row2] });
   },
 
   // Handle button clicks
@@ -888,6 +950,189 @@ module.exports = {
       pendingAnalysis.set(interaction.user.id, { mode: 'technical_select', tradeId: pending.tradeId || null });
       const row = buildModelSelectMenu('llmanalyze_model_select', 8, true);
       await interaction.reply({ content: 'Technical Analyst — Select up to 8 vision-capable models:', components: [row], flags: 64 });
+
+    // ─── B.O.B. Thesis Handlers ───
+
+    } else if (id === 'llma_bob') {
+      await interaction.deferReply();
+
+      const channel = interaction.channel ?? await interaction.client.channels.fetch(interaction.channelId);
+      const thesisMsg = await findBobThesis(channel);
+
+      if (!thesisMsg) {
+        const embed = new EmbedBuilder()
+          .setTitle('B.O.B. Thesis — Not Found')
+          .setColor(0xef4444)
+          .setDescription(
+            'No B.O.B. thesis was found in recent messages.\n\n' +
+            'Make sure a thesis from **B.O.B.** (`__jollyadvisorbot__`) has been posted in this channel.'
+          );
+        await interaction.editReply({ embeds: [embed] });
+        return;
+      }
+
+      const parsingEmbed = new EmbedBuilder()
+        .setTitle('B.O.B. Thesis — Parsing...')
+        .setColor(0xf59e0b)
+        .setDescription('Analyzing thesis content with LLM...');
+      await interaction.editReply({ embeds: [parsingEmbed] });
+
+      try {
+        const parsed = await parseBobThesis(thesisMsg.content);
+        const dateMatch = thesisMsg.content.match(/(?:Daily\s+)?Thesis\s*[—–\-]\s*(.+?)(?:\n|\*)/i);
+        const thesisDate = dateMatch ? dateMatch[1].trim() : thesisMsg.createdAt.toLocaleDateString('en-US', { dateStyle: 'medium' });
+
+        pendingAnalysis.set(interaction.user.id, {
+          bobThesis: { ...parsed, fullText: thesisMsg.content, messageId: thesisMsg.id },
+          bobThesisDate: thesisDate,
+        });
+
+        const panel = buildBobPanel(parsed, thesisDate);
+        await interaction.editReply(panel);
+      } catch (err) {
+        console.error('[B.O.B.] Thesis parsing failed:', err);
+        const embed = new EmbedBuilder()
+          .setTitle('B.O.B. Thesis — Parse Error')
+          .setColor(0xef4444)
+          .setDescription(`Failed to parse the thesis: ${err.message}\n\nPlease try again.`);
+        await interaction.editReply({ embeds: [embed] });
+      }
+
+    } else if (id === 'llma_bob_bb') {
+      const pending = pendingAnalysis.get(interaction.user.id);
+      if (!pending?.bobThesis) {
+        await interaction.reply({ content: 'No B.O.B. thesis found. Run `/llmanalyze` → B.O.B. again.', flags: 64 });
+        return;
+      }
+      const thesis = pending.bobThesis;
+      await interaction.deferReply();
+
+      const paymentTx = await collectPayment(interaction, 'Bullish or Bearish');
+      if (!paymentTx) return;
+
+      const assetDesc = `B.O.B. Trading Thesis: ${thesis.summary}\n\nFull thesis:\n${thesis.fullText}`.slice(0, 500);
+      const horizon = thesis.timeframe || 'As described in thesis';
+      await runBullish(interaction, assetDesc, horizon, null, paymentTx);
+
+    } else if (id === 'llma_bob_mv') {
+      const pending = pendingAnalysis.get(interaction.user.id);
+      if (!pending?.bobThesis) {
+        await interaction.reply({ content: 'No B.O.B. thesis found. Run `/llmanalyze` → B.O.B. again.', flags: 64 });
+        return;
+      }
+      const thesis = pending.bobThesis;
+      // Store mode so handleModalSubmit picks it up
+      pendingAnalysis.set(interaction.user.id, { ...pending, mode: 'bob_multival_prefill' });
+
+      const assetInput = new TextInputBuilder().setCustomId('asset').setLabel('Asset (e.g. BTC, ETH, AAPL)').setStyle(TextInputStyle.Short).setRequired(true).setValue(thesis.asset.slice(0, 50));
+      const targetInput = new TextInputBuilder().setCustomId('target').setLabel('Target (e.g. Q3 2026, EOY 2027)').setStyle(TextInputStyle.Short).setRequired(true);
+      if (thesis.timeframe && thesis.timeframe !== 'Not specified') targetInput.setValue(thesis.timeframe.slice(0, 50));
+
+      const modal = new ModalBuilder()
+        .setCustomId('llma_multival_modal')
+        .setTitle('Multi-Valuation (B.O.B.)')
+        .addComponents(
+          new ActionRowBuilder().addComponents(assetInput),
+          new ActionRowBuilder().addComponents(targetInput),
+        );
+      await interaction.showModal(modal);
+
+    } else if (id === 'llma_bob_sv') {
+      const pending = pendingAnalysis.get(interaction.user.id);
+      if (!pending?.bobThesis) {
+        await interaction.reply({ content: 'No B.O.B. thesis found. Run `/llmanalyze` → B.O.B. again.', flags: 64 });
+        return;
+      }
+      const thesis = pending.bobThesis;
+      pendingAnalysis.set(interaction.user.id, { ...pending, mode: 'bob_soloval_prefill' });
+
+      const assetInput = new TextInputBuilder().setCustomId('asset').setLabel('Asset (e.g. BTC, ETH, AAPL)').setStyle(TextInputStyle.Short).setRequired(true).setValue(thesis.asset.slice(0, 50));
+      const targetInput = new TextInputBuilder().setCustomId('target').setLabel('Target (e.g. Q3 2026, EOY 2027)').setStyle(TextInputStyle.Short).setRequired(true);
+      if (thesis.timeframe && thesis.timeframe !== 'Not specified') targetInput.setValue(thesis.timeframe.slice(0, 50));
+
+      const modal = new ModalBuilder()
+        .setCustomId('llma_soloval_modal')
+        .setTitle('Solo-Valuation (B.O.B.)')
+        .addComponents(
+          new ActionRowBuilder().addComponents(assetInput),
+          new ActionRowBuilder().addComponents(targetInput),
+          new ActionRowBuilder().addComponents(
+            new TextInputBuilder().setCustomId('runs').setLabel('Number of runs (1-5, default 3)').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('3')
+          ),
+        );
+      await interaction.showModal(modal);
+
+    } else if (id === 'llma_bob_ta') {
+      const pending = pendingAnalysis.get(interaction.user.id);
+      if (!pending?.bobThesis) {
+        await interaction.reply({ content: 'No B.O.B. thesis found. Run `/llmanalyze` → B.O.B. again.', flags: 64 });
+        return;
+      }
+      pendingAnalysis.set(interaction.user.id, { ...pending, mode: 'technical_select' });
+      const row = buildModelSelectMenu('llmanalyze_model_select', 8, true);
+      await interaction.reply({ content: 'Technical Analyst (B.O.B.) — Select up to 8 vision-capable models:', components: [row], flags: 64 });
+
+    } else if (id === 'llma_bob_view') {
+      const pending = pendingAnalysis.get(interaction.user.id);
+      if (!pending?.bobThesis) return;
+      const thesis = pending.bobThesis;
+
+      const embed = new EmbedBuilder()
+        .setTitle('B.O.B. Thesis — Full Ingestion')
+        .setColor(0x3b82f6)
+        .addFields(
+          { name: 'Asset', value: thesis.asset, inline: true },
+          { name: 'Direction', value: thesis.direction, inline: true },
+          { name: 'Confidence', value: thesis.confidence, inline: true },
+          { name: 'Timeframe', value: thesis.timeframe || 'Not specified', inline: true },
+          { name: 'Summary', value: thesis.summary },
+          { name: 'Full Thesis', value: thesis.fullText.slice(0, 1024) },
+        );
+      if (thesis.fullText.length > 1024) {
+        embed.addFields({ name: 'Full Thesis (cont.)', value: thesis.fullText.slice(1024, 2048) });
+      }
+
+      const backRow = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('llma_bob_back').setLabel('Back to Options').setStyle(ButtonStyle.Secondary),
+      );
+      await interaction.update({ embeds: [embed], components: [backRow] });
+
+    } else if (id === 'llma_bob_back') {
+      const pending = pendingAnalysis.get(interaction.user.id);
+      if (!pending?.bobThesis) return;
+      const panel = buildBobPanel(pending.bobThesis, pending.bobThesisDate);
+      await interaction.update(panel);
+
+    } else if (id === 'llma_bob_trade') {
+      const pending = pendingAnalysis.get(interaction.user.id);
+      if (!pending?.bobThesis) {
+        await interaction.reply({ content: 'No B.O.B. thesis found. Run `/llmanalyze` → B.O.B. again.', flags: 64 });
+        return;
+      }
+      const thesis = pending.bobThesis;
+      const dirLabel = thesis.direction === 'SHORT' ? 'SHORT' : 'LONG';
+
+      const modal = new ModalBuilder()
+        .setCustomId('llma_bob_trade_modal')
+        .setTitle(`Trade from B.O.B. — ${dirLabel}`)
+        .addComponents(
+          new ActionRowBuilder().addComponents(
+            new TextInputBuilder().setCustomId('asset').setLabel('Asset / Ticker').setStyle(TextInputStyle.Short).setRequired(true).setValue(thesis.asset.slice(0, 50)).setMaxLength(50)
+          ),
+          new ActionRowBuilder().addComponents(
+            new TextInputBuilder().setCustomId('entry').setLabel('Entry Price').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('e.g. 64500').setMaxLength(30)
+          ),
+          new ActionRowBuilder().addComponents(
+            new TextInputBuilder().setCustomId('target').setLabel('Target Price').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('e.g. 72000').setMaxLength(30)
+          ),
+          new ActionRowBuilder().addComponents(
+            new TextInputBuilder().setCustomId('timeframe').setLabel('Timeframe').setStyle(TextInputStyle.Short).setRequired(true).setValue((thesis.timeframe || '').slice(0, 30)).setMaxLength(30)
+          ),
+          new ActionRowBuilder().addComponents(
+            new TextInputBuilder().setCustomId('emotion_reasoning').setLabel('Emotion (1-10) & Reasoning').setStyle(TextInputStyle.Paragraph).setRequired(true).setValue(`B.O.B. Thesis: ${thesis.summary}`.slice(0, 500)).setMaxLength(500)
+          ),
+        );
+      await interaction.showModal(modal);
     }
   },
 
@@ -983,6 +1228,62 @@ module.exports = {
           .setDescription(`An error occurred generating the analysis chart. Please try again.\n\n\`${err.message}\``);
         await interaction.editReply({ embeds: [errorEmbed] }).catch(() => {});
       }
+
+    } else if (id === 'llma_bob_trade_modal') {
+      const existing = pendingAnalysis.get(interaction.user.id);
+      if (!existing?.bobThesis) {
+        await interaction.reply({ content: 'No B.O.B. thesis found. Please run `/llmanalyze` → B.O.B. again.', flags: 64 });
+        return;
+      }
+
+      const thesis = existing.bobThesis;
+      const direction = thesis.direction === 'SHORT' ? 'Short' : 'Long';
+      const asset = interaction.fields.getTextInputValue('asset');
+      const entry = interaction.fields.getTextInputValue('entry');
+      const target = interaction.fields.getTextInputValue('target');
+      const timeframe = interaction.fields.getTextInputValue('timeframe');
+      const emotionReasoning = interaction.fields.getTextInputValue('emotion_reasoning');
+      const username = interaction.user.username;
+
+      const trade = addTrade(interaction.user.id, {
+        asset,
+        direction,
+        entry,
+        target,
+        timeframe,
+        emotionReasoning,
+        screenshotUrl: null,
+        username,
+      });
+
+      console.log(`[B.O.B. Trade] ${username} logged trade #${trade.id}: ${direction} ${asset} @ ${entry} → ${target}`);
+
+      const dirEmoji = direction.toLowerCase() === 'long' ? '📈' : '📉';
+      const embed = new EmbedBuilder()
+        .setTitle(`TRADE TICKET #${trade.id}`)
+        .setColor(direction.toLowerCase() === 'long' ? 0x22c55e : 0xef4444)
+        .setDescription(
+          `**Trade ID:** \`${trade.tradeId}\`\n` +
+          `**Trader:** ${username}\n` +
+          `**Asset:** ${asset}\n` +
+          `**Direction:** ${dirEmoji} ${direction.toUpperCase()}\n` +
+          `**Entry:** ${entry}\n` +
+          `**Target:** ${target}\n` +
+          `**Timeframe:** ${timeframe}\n\n` +
+          `**Emotion & Reasoning:**\n${emotionReasoning}\n\n` +
+          `**Source:** B.O.B. Thesis\n` +
+          `**Logged:** ${new Date(trade.createdAt).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })}`
+        );
+
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`trade_llma_${trade.tradeId}`)
+          .setLabel('Run LLM Analysis')
+          .setEmoji('🔍')
+          .setStyle(ButtonStyle.Primary),
+      );
+
+      await interaction.reply({ embeds: [embed], components: [row] });
     }
   },
 
