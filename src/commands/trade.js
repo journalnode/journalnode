@@ -28,11 +28,11 @@ module.exports = {
 
     const assetInput = new TextInputBuilder()
       .setCustomId('asset')
-      .setLabel('Asset / Ticker')
+      .setLabel('Asset / Ticker | Timeframe')
       .setStyle(TextInputStyle.Short)
-      .setPlaceholder('e.g. BTC, ETH, AAPL, XRP/USD')
+      .setPlaceholder('e.g. BTC | 4H   or   ETH | Daily')
       .setRequired(true)
-      .setMaxLength(50);
+      .setMaxLength(60);
 
     const entryInput = new TextInputBuilder()
       .setCustomId('entry')
@@ -50,12 +50,12 @@ module.exports = {
       .setRequired(true)
       .setMaxLength(30);
 
-    const timeframeInput = new TextInputBuilder()
-      .setCustomId('timeframe')
-      .setLabel('Timeframe')
+    const stopLossInput = new TextInputBuilder()
+      .setCustomId('stop_loss')
+      .setLabel('Stop Loss Price')
       .setStyle(TextInputStyle.Short)
-      .setPlaceholder('e.g. 4H, Daily, Swing, 1W')
-      .setRequired(true)
+      .setPlaceholder('e.g. 61000')
+      .setRequired(false)
       .setMaxLength(30);
 
     const emotionInput = new TextInputBuilder()
@@ -70,7 +70,7 @@ module.exports = {
       new ActionRowBuilder().addComponents(assetInput),
       new ActionRowBuilder().addComponents(entryInput),
       new ActionRowBuilder().addComponents(targetInput),
-      new ActionRowBuilder().addComponents(timeframeInput),
+      new ActionRowBuilder().addComponents(stopLossInput),
       new ActionRowBuilder().addComponents(emotionInput),
     );
 
@@ -81,11 +81,16 @@ module.exports = {
     const userId = interaction.user.id;
     const username = interaction.user.username;
 
-    const asset = interaction.fields.getTextInputValue('asset');
+    const assetRaw = interaction.fields.getTextInputValue('asset');
     const entry = interaction.fields.getTextInputValue('entry');
     const target = interaction.fields.getTextInputValue('target');
-    const timeframe = interaction.fields.getTextInputValue('timeframe');
+    const stopLoss = interaction.fields.getTextInputValue('stop_loss') || null;
     const emotionReasoning = interaction.fields.getTextInputValue('emotion_reasoning');
+
+    // Parse "Asset | Timeframe" from combined field
+    const parts = assetRaw.split('|').map(s => s.trim());
+    const asset = parts[0];
+    const timeframe = parts[1] || 'Not specified';
 
     // Retrieve pre-modal data
     const pending = pendingTrades.get(userId) || {};
@@ -103,6 +108,7 @@ module.exports = {
       direction,
       entry,
       target,
+      stopLoss,
       timeframe,
       emotionReasoning,
       screenshotUrl,
@@ -123,6 +129,7 @@ module.exports = {
     desc += `**Direction:** ${directionEmoji} ${direction.toUpperCase()}\n`;
     desc += `**Entry:** ${entry}\n`;
     desc += `**Target:** ${target}\n`;
+    if (stopLoss) desc += `**Stop Loss:** ${stopLoss}\n`;
     desc += `**Timeframe:** ${timeframe}\n\n`;
     desc += `**Emotion & Reasoning:**\n${emotionReasoning}\n\n`;
     desc += `**Logged:** ${new Date(trade.createdAt).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })}`;

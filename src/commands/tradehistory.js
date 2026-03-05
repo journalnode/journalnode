@@ -221,6 +221,7 @@ async function runSinglePostMortem(interaction, trade) {
     `Entry Price: ${trade.entry}`,
     `Exit Price: ${trade.exitPrice || 'Not recorded'}`,
     `Target Price: ${trade.target}`,
+    `Stop Loss: ${trade.stopLoss || 'Not set'}`,
     `Timeframe: ${trade.timeframe}`,
     `Outcome: ${trade.outcome}`,
     `Opened: ${formatDate(trade.createdAt)}`,
@@ -278,7 +279,7 @@ async function runTimeframePostMortem(interaction, trades, startDate, endDate) {
   const tradesData = trades.map((t, i) => [
     `--- Trade ${i + 1} of ${trades.length} ---`,
     `Trade #${t.id} | Asset: ${t.asset} | Direction: ${t.direction}`,
-    `Entry: ${t.entry} | Exit: ${t.exitPrice || 'N/A'} | Target: ${t.target}`,
+    `Entry: ${t.entry} | Exit: ${t.exitPrice || 'N/A'} | Target: ${t.target} | Stop Loss: ${t.stopLoss || 'N/A'}`,
     `Timeframe: ${t.timeframe} | Outcome: ${t.outcome}`,
     `Opened: ${formatDate(t.createdAt)} | Closed: ${formatDate(t.closedAt)}`,
     `Reasoning: ${t.emotionReasoning || 'Not provided'}`,
