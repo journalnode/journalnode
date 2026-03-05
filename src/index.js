@@ -41,6 +41,8 @@ const analyzeCmd = require('./commands/analyze');
 commands.set(analyzeCmd.name, analyzeCmd);
 const faqCmd = require('./commands/faq');
 commands.set(faqCmd.name, faqCmd);
+const tradehistoryCmd = require('./commands/tradehistory');
+commands.set(tradehistoryCmd.name, tradehistoryCmd);
 
 const { chat: llmChat } = require('./openrouter');
 const { formatEntries, summarizeStats, sendLong } = require('./commands/helpers');
@@ -211,6 +213,12 @@ const faqBuilder = new SlashCommandBuilder()
   .setDescription(faqCmd.description);
 slashCommands.push(faqBuilder.toJSON());
 
+// /tradehistory: no options needed
+const tradehistoryBuilder = new SlashCommandBuilder()
+  .setName('tradehistory')
+  .setDescription(tradehistoryCmd.description);
+slashCommands.push(tradehistoryBuilder.toJSON());
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -228,7 +236,7 @@ client.once('clientReady', async () => {
   try {
     console.log('Registering slash commands...');
     await rest.put(Routes.applicationCommands(client.user.id), { body: slashCommands });
-    const allNames = ['chat', 'postfiat', 'wallets', 'send', 'balance', 'mint', 'gallery', 'receive', 'onboard', 'trade', 'mytrades', 'menu', 'llmanalyze', 'faq'].map(c => `/${c}`).join(', ');
+    const allNames = ['chat', 'postfiat', 'wallets', 'send', 'balance', 'mint', 'gallery', 'receive', 'onboard', 'trade', 'mytrades', 'menu', 'llmanalyze', 'faq', 'tradehistory'].map(c => `/${c}`).join(', ');
     console.log(`Registered ${slashCommands.length} slash commands: ${allNames}`);
   } catch (err) {
     console.error('Failed to register slash commands:', err);
@@ -328,6 +336,18 @@ client.on('interactionCreate', async (interaction) => {
           await interaction.reply({ content: errorMsg, flags: 64 }).catch(() => {});
         }
       }
+    } else if (interaction.customId.startsWith('th_')) {
+      try {
+        await tradehistoryCmd.handleButton(interaction);
+      } catch (err) {
+        console.error('[/tradehistory] Button handler failed:', err);
+        const errorMsg = 'Something went wrong. Please try `/tradehistory` again.';
+        if (interaction.deferred || interaction.replied) {
+          await interaction.followUp({ content: errorMsg, flags: 64 }).catch(() => {});
+        } else {
+          await interaction.reply({ content: errorMsg, flags: 64 }).catch(() => {});
+        }
+      }
     } else if (interaction.customId.startsWith('faq_')) {
       try {
         await faqCmd.handleButton(interaction);
@@ -346,7 +366,19 @@ client.on('interactionCreate', async (interaction) => {
 
   // Handle StringSelectMenu interactions (model selection for /llmanalyze)
   if (interaction.isStringSelectMenu()) {
-    if (interaction.customId === 'llmanalyze_model_select') {
+    if (interaction.customId === 'th_select_trade' || interaction.customId === 'th_timeframe_select') {
+      try {
+        await tradehistoryCmd.handleSelectMenu(interaction);
+      } catch (err) {
+        console.error('[/tradehistory] Select menu failed:', err);
+        const errorMsg = 'Something went wrong. Please try `/tradehistory` again.';
+        if (interaction.deferred || interaction.replied) {
+          await interaction.followUp({ content: errorMsg, flags: 64 }).catch(() => {});
+        } else {
+          await interaction.reply({ content: errorMsg, flags: 64 }).catch(() => {});
+        }
+      }
+    } else if (interaction.customId === 'llmanalyze_model_select') {
       try {
         await analyzeCmd.handleSelectMenu(interaction);
       } catch (err) {
