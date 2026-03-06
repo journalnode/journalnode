@@ -43,6 +43,8 @@ const faqCmd = require('./commands/faq');
 commands.set(faqCmd.name, faqCmd);
 const tradehistoryCmd = require('./commands/tradehistory');
 commands.set(tradehistoryCmd.name, tradehistoryCmd);
+const chartCmd = require('./commands/chart');
+commands.set(chartCmd.name, chartCmd);
 
 const { chat: llmChat } = require('./openrouter');
 const { formatEntries, summarizeStats, sendLong } = require('./commands/helpers');
@@ -241,6 +243,31 @@ const tradehistoryBuilder = new SlashCommandBuilder()
       ));
 slashCommands.push(tradehistoryBuilder.toJSON());
 
+// /chart: ticker + timeframe
+const chartBuilder = new SlashCommandBuilder()
+  .setName('chart')
+  .setDescription(chartCmd.description)
+  .addStringOption(opt =>
+    opt.setName('ticker')
+      .setDescription('Crypto ticker (e.g. BTC, ETH, SOL)')
+      .setRequired(true))
+  .addStringOption(opt =>
+    opt.setName('timeframe')
+      .setDescription('Chart timeframe')
+      .setRequired(false)
+      .addChoices(
+        { name: '1 Minute', value: '1m' },
+        { name: '5 Minute', value: '5m' },
+        { name: '15 Minute', value: '15m' },
+        { name: '1 Hour', value: '1h' },
+        { name: '4 Hour', value: '4h' },
+        { name: '12 Hour', value: '12h' },
+        { name: 'Daily', value: '1d' },
+        { name: 'Weekly', value: '1w' },
+        { name: 'Monthly', value: '1M' },
+      ));
+slashCommands.push(chartBuilder.toJSON());
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -258,7 +285,7 @@ client.once('clientReady', async () => {
   try {
     console.log('Registering slash commands...');
     await rest.put(Routes.applicationCommands(client.user.id), { body: slashCommands });
-    const allNames = ['chat', 'postfiat', 'wallets', 'send', 'balance', 'mint', 'gallery', 'receive', 'onboard', 'trade', 'mytrades', 'menu', 'llmanalyze', 'faq', 'tradehistory'].map(c => `/${c}`).join(', ');
+    const allNames = ['chat', 'postfiat', 'wallets', 'send', 'balance', 'mint', 'gallery', 'receive', 'onboard', 'trade', 'mytrades', 'menu', 'llmanalyze', 'faq', 'tradehistory', 'chart'].map(c => `/${c}`).join(', ');
     console.log(`Registered ${slashCommands.length} slash commands: ${allNames}`);
   } catch (err) {
     console.error('Failed to register slash commands:', err);
