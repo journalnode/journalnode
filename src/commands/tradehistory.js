@@ -13,20 +13,58 @@ const PFT_EXPLORER = 'https://explorer.testnet.postfiat.org/transactions';
 // ─── Pagination State ───
 
 const PAGE_SIZE = 5;
-const pageState = new Map(); // userId -> { page, closedTrades }
+const pageState = new Map(); // userId -> { page, closedTrades, filterLabel }
+
+// ─── Filter & Sort Labels ───
+
+const FILTER_LABELS = {
+  winners: 'Winners Only',
+  losers: 'Losers Only',
+  longs: 'Longs Only',
+  shorts: 'Shorts Only',
+};
 
 // ─── Helpers ───
 
-function getClosedTrades(userId) {
+function getClosedTrades(userId, { filter, asset, sort } = {}) {
   const trades = getUserTrades(userId);
-  return trades.filter(t => t.status === 'closed').sort((a, b) => new Date(b.closedAt) - new Date(a.closedAt));
+  let closed = trades.filter(t => t.status === 'closed');
+
+  // Apply outcome/direction filter
+  if (filter === 'winners') closed = closed.filter(t => t.outcome === 'Win');
+  if (filter === 'losers') closed = closed.filter(t => t.outcome === 'Loss');
+  if (filter === 'longs') closed = closed.filter(t => t.direction?.toLowerCase() === 'long');
+  if (filter === 'shorts') closed = closed.filter(t => t.direction?.toLowerCase() === 'short');
+
+  // Apply asset filter (case-insensitive partial match)
+  if (asset) {
+    const needle = asset.toLowerCase();
+    closed = closed.filter(t => t.asset?.toLowerCase().includes(needle));
+  }
+
+  // Sort
+  if (sort === 'oldest') {
+    closed.sort((a, b) => new Date(a.closedAt) - new Date(b.closedAt));
+  } else {
+    closed.sort((a, b) => new Date(b.closedAt) - new Date(a.closedAt));
+  }
+
+  return closed;
+}
+
+function buildFilterLabel(filter, asset, sort) {
+  const parts = [];
+  if (filter) parts.push(FILTER_LABELS[filter] || filter);
+  if (asset) parts.push(`Asset: ${asset.toUpperCase()}`);
+  if (sort === 'oldest') parts.push('Oldest First');
+  return parts.length > 0 ? parts.join(' | ') : null;
 }
 
 function formatDate(iso) {
   return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-function buildTradeListEmbed(closedTrades, page) {
+function buildTradeListEmbed(closedTrades, page, filterLabel) {
   const totalPages = Math.max(1, Math.ceil(closedTrades.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages - 1);
   const start = currentPage * PAGE_SIZE;
@@ -40,7 +78,9 @@ function buildTradeListEmbed(closedTrades, page) {
     .setTitle('TRADE HISTORY')
     .setColor(0x6366f1);
 
-  let desc = `**${closedTrades.length}** closed trade${closedTrades.length !== 1 ? 's' : ''} | `;
+  let desc = '';
+  if (filterLabel) desc += `**Filters:** ${filterLabel}\n`;
+  desc += `**${closedTrades.length}** closed trade${closedTrades.length !== 1 ? 's' : ''} | `;
   desc += `**${wins}W / ${losses}L** (${winRate}% win rate)\n`;
   desc += `Page ${currentPage + 1} of ${totalPages}\n\n`;
 
@@ -382,19 +422,25 @@ module.exports = {
 
   async execute(interaction) {
     const userId = interaction.user.id;
-    const closedTrades = getClosedTrades(userId);
+    const filter = interaction.options.getString('filter') || null;
+    const asset = interaction.options.getString('asset') || null;
+    const sort = interaction.options.getString('sort') || null;
+
+    const closedTrades = getClosedTrades(userId, { filter, asset, sort });
+    const filterLabel = buildFilterLabel(filter, asset, sort);
 
     if (closedTrades.length === 0) {
-      await interaction.editReply({
-        content: 'You have no closed trades yet. Use `/mytrades` to close an open trade first.',
-      });
+      const msg = filterLabel
+        ? `No closed trades found matching: **${filterLabel}**. Try different filters or run \`/tradehistory\` without filters.`
+        : 'You have no closed trades yet. Use `/mytrades` to close an open trade first.';
+      await interaction.editReply({ content: msg });
       return;
     }
 
     const page = 0;
-    pageState.set(userId, { page, closedTrades });
+    pageState.set(userId, { page, closedTrades, filterLabel, filter, asset, sort });
 
-    const { embed, currentPage, totalPages } = buildTradeListEmbed(closedTrades, page);
+    const { embed, currentPage, totalPages } = buildTradeListEmbed(closedTrades, page, filterLabel);
     const components = buildComponents(closedTrades, currentPage, totalPages);
     await interaction.editReply({ embeds: [embed], components });
   },
@@ -414,24 +460,27 @@ module.exports = {
         return;
       }
 
-      const closedTrades = getClosedTrades(userId);
+      // Re-fetch with same filters to stay current
+      const closedTrades = getClosedTrades(userId, { filter: state.filter, asset: state.asset, sort: state.sort });
       const newPage = id === 'th_next' ? state.page + 1 : state.page - 1;
-      pageState.set(userId, { page: newPage, closedTrades });
+      pageState.set(userId, { ...state, page: newPage, closedTrades });
 
-      const { embed, currentPage, totalPages } = buildTradeListEmbed(closedTrades, newPage);
+      const { embed, currentPage, totalPages } = buildTradeListEmbed(closedTrades, newPage, state.filterLabel);
       const components = buildComponents(closedTrades, currentPage, totalPages);
       await interaction.update({ embeds: [embed], components });
       return;
     }
 
     if (id === 'th_timeframe_analysis') {
-      const closedTrades = getClosedTrades(userId);
+      const closedTrades = state
+        ? getClosedTrades(userId, { filter: state.filter, asset: state.asset, sort: state.sort })
+        : getClosedTrades(userId);
       if (closedTrades.length === 0) {
         await interaction.reply({ content: 'No closed trades to analyze.', flags: 64 });
         return;
       }
 
-      pendingTimeframe.set(userId, { closedTrades });
+      pendingTimeframe.set(userId, { closedTrades, filterLabel: state?.filterLabel });
 
       // Build timeframe options based on available trade dates
       const options = [];
@@ -470,12 +519,14 @@ module.exports = {
         .setMaxValues(1)
         .addOptions(options);
 
+      const filterNote = state?.filterLabel ? `\n**Active Filters:** ${state.filterLabel}\n` : '';
       const embed = new EmbedBuilder()
         .setTitle('Timeframe Analysis')
         .setColor(0x6366f1)
         .setDescription(
           'Select a timeframe to run an AI post-mortem across all trades in that period.\n\n' +
-          'The analysis will identify patterns, trends, and provide actionable improvements.\n\n' +
+          'The analysis will identify patterns, trends, and provide actionable improvements.\n' +
+          filterNote + '\n' +
           `**Cost:** ${LLM_FEE_PFT} PFT`
         );
 
@@ -513,7 +564,9 @@ module.exports = {
       const value = interaction.values[0]; // e.g. "tf_30"
       const days = parseInt(value.replace('tf_', ''), 10);
 
-      const closedTrades = getClosedTrades(userId);
+      // Use the already-filtered trade set from pendingTimeframe
+      const pending = pendingTimeframe.get(userId);
+      const closedTrades = pending?.closedTrades || getClosedTrades(userId);
       const now = new Date();
       const cutoff = new Date(now);
       cutoff.setDate(cutoff.getDate() - days);

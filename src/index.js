@@ -213,10 +213,32 @@ const faqBuilder = new SlashCommandBuilder()
   .setDescription(faqCmd.description);
 slashCommands.push(faqBuilder.toJSON());
 
-// /tradehistory: no options needed
+// /tradehistory: optional filter and sort params
 const tradehistoryBuilder = new SlashCommandBuilder()
   .setName('tradehistory')
-  .setDescription(tradehistoryCmd.description);
+  .setDescription(tradehistoryCmd.description)
+  .addStringOption(opt =>
+    opt.setName('filter')
+      .setDescription('Filter trades by outcome or direction')
+      .setRequired(false)
+      .addChoices(
+        { name: 'Winners Only', value: 'winners' },
+        { name: 'Losers Only', value: 'losers' },
+        { name: 'Longs Only', value: 'longs' },
+        { name: 'Shorts Only', value: 'shorts' },
+      ))
+  .addStringOption(opt =>
+    opt.setName('asset')
+      .setDescription('Filter by asset ticker (e.g. BTC, ETH)')
+      .setRequired(false))
+  .addStringOption(opt =>
+    opt.setName('sort')
+      .setDescription('Sort order for trades')
+      .setRequired(false)
+      .addChoices(
+        { name: 'Newest First (default)', value: 'newest' },
+        { name: 'Oldest First', value: 'oldest' },
+      ));
 slashCommands.push(tradehistoryBuilder.toJSON());
 
 const client = new Client({
