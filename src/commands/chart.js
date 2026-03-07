@@ -29,8 +29,9 @@ const INTERVAL_MS = {
   '1M':  30 * 24 * 60 * 60 * 1000,
 };
 
-// Known HIP-3 builder prefixes for tradfi assets (TradeXYZ is the primary deployer)
-const TRADFI_PREFIXES = ['xyz'];
+// Known HIP-3 builder prefixes for tradfi / builder-deployed perps
+// xyz = TradeXYZ (stocks), km = Kinetiq (indices), hyna = HyENA, vntl = Ventuals (pre-IPO)
+const HIP3_PREFIXES = ['xyz', 'km', 'hyna', 'vntl'];
 
 async function fetchCandlesRaw(coin, interval, startTime, endTime) {
   const res = await fetch(HL_API, {
@@ -57,7 +58,7 @@ async function fetchCandles(coin, interval, count) {
   if (cryptoData) return { candles: cryptoData, resolvedCoin: coin.toUpperCase(), isTradfi: false };
 
   // 2) Try as a tradfi / HIP-3 builder-deployed asset (e.g. "xyz:NVDA")
-  for (const prefix of TRADFI_PREFIXES) {
+  for (const prefix of HIP3_PREFIXES) {
     const tradfiCoin = `${prefix}:${coin.toUpperCase()}`;
     const tradfiData = await fetchCandlesRaw(tradfiCoin, interval, startTime, now);
     if (tradfiData) return { candles: tradfiData, resolvedCoin: tradfiCoin, isTradfi: true };
