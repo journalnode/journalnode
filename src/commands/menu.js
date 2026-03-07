@@ -11,6 +11,7 @@ module.exports = {
       '`/trade` — Log a trade idea with direction, prices, reasoning.',
       '`/mytrades` — View active trades, close positions with P&L and reflection.',
       '`/llmanalyze` — AI-powered market analysis (bullish/bearish, valuations, technical).',
+      '`/chart` — Display a candlestick chart (crypto or stocks) from Hyperliquid.',
       '',
       '**━━━ Post Fiat Suite ━━━**',
       '`/postfiat` — Opt in to Post Fiat testnet.',

@@ -7,24 +7,34 @@ const HL_API = 'https://api.hyperliquid.xyz/info';
 
 const TIMEFRAMES = {
   '1m':  { interval: '1m',  candles: 60,  label: '1 Minute' },
+  '3m':  { interval: '3m',  candles: 60,  label: '3 Minute' },
   '5m':  { interval: '5m',  candles: 60,  label: '5 Minute' },
   '15m': { interval: '15m', candles: 60,  label: '15 Minute' },
+  '30m': { interval: '30m', candles: 60,  label: '30 Minute' },
   '1h':  { interval: '1h',  candles: 60,  label: '1 Hour' },
+  '2h':  { interval: '2h',  candles: 60,  label: '2 Hour' },
   '4h':  { interval: '4h',  candles: 60,  label: '4 Hour' },
+  '8h':  { interval: '8h',  candles: 60,  label: '8 Hour' },
   '12h': { interval: '12h', candles: 60,  label: '12 Hour' },
   '1d':  { interval: '1d',  candles: 90,  label: 'Daily' },
+  '3d':  { interval: '3d',  candles: 60,  label: '3 Day' },
   '1w':  { interval: '1w',  candles: 52,  label: 'Weekly' },
   '1M':  { interval: '1M',  candles: 24,  label: 'Monthly' },
 };
 
 const INTERVAL_MS = {
   '1m':  60 * 1000,
+  '3m':  3 * 60 * 1000,
   '5m':  5 * 60 * 1000,
   '15m': 15 * 60 * 1000,
+  '30m': 30 * 60 * 1000,
   '1h':  60 * 60 * 1000,
+  '2h':  2 * 60 * 60 * 1000,
   '4h':  4 * 60 * 60 * 1000,
+  '8h':  8 * 60 * 60 * 1000,
   '12h': 12 * 60 * 60 * 1000,
   '1d':  24 * 60 * 60 * 1000,
+  '3d':  3 * 24 * 60 * 60 * 1000,
   '1w':  7 * 24 * 60 * 60 * 1000,
   '1M':  30 * 24 * 60 * 60 * 1000,
 };
@@ -92,7 +102,7 @@ function formatAxisPrice(price) {
 
 function formatDateLabel(timestamp, interval) {
   const d = new Date(timestamp);
-  if (['1m', '5m', '15m', '1h', '4h', '12h'].includes(interval)) {
+  if (['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '8h', '12h'].includes(interval)) {
     const mo = d.toLocaleString('en-US', { month: 'short' });
     const day = d.getDate();
     const h = String(d.getHours()).padStart(2, '0');

@@ -257,12 +257,17 @@ const chartBuilder = new SlashCommandBuilder()
       .setRequired(false)
       .addChoices(
         { name: '1 Minute', value: '1m' },
+        { name: '3 Minute', value: '3m' },
         { name: '5 Minute', value: '5m' },
         { name: '15 Minute', value: '15m' },
+        { name: '30 Minute', value: '30m' },
         { name: '1 Hour', value: '1h' },
+        { name: '2 Hour', value: '2h' },
         { name: '4 Hour', value: '4h' },
+        { name: '8 Hour', value: '8h' },
         { name: '12 Hour', value: '12h' },
         { name: 'Daily', value: '1d' },
+        { name: '3 Day', value: '3d' },
         { name: 'Weekly', value: '1w' },
         { name: 'Monthly', value: '1M' },
       ));
