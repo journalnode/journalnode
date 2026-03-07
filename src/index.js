@@ -466,7 +466,7 @@ client.on('interactionCreate', async (interaction) => {
 
     // Commands that don't need journal entries (e.g. /postfiat)
     if (cmd.needsEntries === false) {
-      await interaction.deferReply({ flags: 64 }); // ephemeral — only visible to user
+      await interaction.deferReply(cmd.publicReply ? {} : { flags: 64 });
       await cmd.execute(interaction);
       return;
     }

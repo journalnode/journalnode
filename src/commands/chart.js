@@ -225,6 +225,7 @@ module.exports = {
   description: 'Display a candlestick chart (crypto or stocks) from Hyperliquid.',
   needsEntries: false,
   isModal: false,
+  publicReply: true,
 
   async execute(interaction) {
     const ticker = interaction.options.getString('ticker');
