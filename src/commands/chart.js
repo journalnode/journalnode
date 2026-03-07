@@ -29,31 +29,45 @@ const INTERVAL_MS = {
   '1M':  30 * 24 * 60 * 60 * 1000,
 };
 
-async function fetchCandles(coin, interval, count) {
-  const now = Date.now();
-  const intervalMs = INTERVAL_MS[interval] || 60 * 60 * 1000;
-  const startTime = now - (intervalMs * count);
+// Known HIP-3 builder prefixes for tradfi assets (TradeXYZ is the primary deployer)
+const TRADFI_PREFIXES = ['xyz'];
 
+async function fetchCandlesRaw(coin, interval, startTime, endTime) {
   const res = await fetch(HL_API, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       type: 'candleSnapshot',
-      req: {
-        coin: coin.toUpperCase(),
-        interval,
-        startTime,
-        endTime: now,
-      },
+      req: { coin, interval, startTime, endTime },
     }),
   });
-
-  if (!res.ok) throw new Error(`Hyperliquid API error: ${res.status}`);
+  if (!res.ok) return null;
   const data = await res.json();
-  if (!Array.isArray(data) || data.length === 0) {
-    throw new Error(`No candle data returned for ${coin.toUpperCase()}. Check the ticker — Hyperliquid uses coin names like BTC, ETH, SOL.`);
-  }
+  if (!Array.isArray(data) || data.length === 0) return null;
   return data;
+}
+
+async function fetchCandles(coin, interval, count) {
+  const now = Date.now();
+  const intervalMs = INTERVAL_MS[interval] || 60 * 60 * 1000;
+  const startTime = now - (intervalMs * count);
+
+  // 1) Try as a regular crypto perp (e.g. "BTC", "ETH")
+  const cryptoData = await fetchCandlesRaw(coin.toUpperCase(), interval, startTime, now);
+  if (cryptoData) return { candles: cryptoData, resolvedCoin: coin.toUpperCase(), isTradfi: false };
+
+  // 2) Try as a tradfi / HIP-3 builder-deployed asset (e.g. "xyz:NVDA")
+  for (const prefix of TRADFI_PREFIXES) {
+    const tradfiCoin = `${prefix}:${coin.toUpperCase()}`;
+    const tradfiData = await fetchCandlesRaw(tradfiCoin, interval, startTime, now);
+    if (tradfiData) return { candles: tradfiData, resolvedCoin: tradfiCoin, isTradfi: true };
+  }
+
+  throw new Error(
+    `No data found for **${coin.toUpperCase()}**.\n\n` +
+    'Crypto tickers: `BTC`, `ETH`, `SOL`, `DOGE` (no suffixes)\n' +
+    'Stock tickers: `NVDA`, `TSLA`, `AAPL`, `GOOGL`, `AMZN`'
+  );
 }
 
 // ─── SVG Candlestick Renderer ───
@@ -207,7 +221,7 @@ async function renderCandlestickChart(candles, coin, interval, label) {
 
 module.exports = {
   name: 'chart',
-  description: 'Display a crypto candlestick chart from Hyperliquid.',
+  description: 'Display a candlestick chart (crypto or stocks) from Hyperliquid.',
   needsEntries: false,
   isModal: false,
 
@@ -223,14 +237,19 @@ module.exports = {
     }
 
     try {
-      const candles = await fetchCandles(coin, tf.interval, tf.candles);
-      const { buffer, currentPrice, change, changeSymbol } = await renderCandlestickChart(candles, coin, tf.interval, tf.label);
+      const { candles, resolvedCoin, isTradfi } = await fetchCandles(coin, tf.interval, tf.candles);
+
+      // Display name: strip builder prefix for clean titles (e.g. "xyz:NVDA" → "NVDA")
+      const displayName = resolvedCoin.includes(':') ? resolvedCoin.split(':')[1] : resolvedCoin;
+      const assetTag = isTradfi ? ' (Stock)' : '';
+
+      const { buffer, currentPrice, change, changeSymbol } = await renderCandlestickChart(candles, displayName, tf.interval, tf.label);
 
       const file = new AttachmentBuilder(buffer, { name: 'chart.png' });
       const changeColor = parseFloat(change) >= 0 ? 0x22c55e : 0xef4444;
 
       const embed = new EmbedBuilder()
-        .setTitle(`${coin} \u00B7 ${tf.label} \u00B7 $${formatPrice(currentPrice)}`)
+        .setTitle(`${displayName}${assetTag} \u00B7 ${tf.label} \u00B7 $${formatPrice(currentPrice)}`)
         .setColor(changeColor)
         .setDescription(`${changeSymbol} **${change}%** | Data via Hyperliquid`)
         .setImage('attachment://chart.png')
@@ -246,8 +265,7 @@ module.exports = {
         .setColor(0xef4444)
         .setDescription(
           `**Ticker:** ${coin}\n**Timeframe:** ${tf.label}\n\n` +
-          `${err.message}\n\n` +
-          'Hyperliquid uses coin names like `BTC`, `ETH`, `SOL`, `DOGE`. Try without suffixes like USDT or USD.'
+          `${err.message}`
         );
       await interaction.editReply({ embeds: [errorEmbed] });
     }
