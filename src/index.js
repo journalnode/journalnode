@@ -45,6 +45,8 @@ const tradehistoryCmd = require('./commands/tradehistory');
 commands.set(tradehistoryCmd.name, tradehistoryCmd);
 const chartCmd = require('./commands/chart');
 commands.set(chartCmd.name, chartCmd);
+const sendnftCmd = require('./commands/sendnft');
+commands.set(sendnftCmd.name, sendnftCmd);
 
 const { chat: llmChat } = require('./openrouter');
 const { formatEntries, summarizeStats, sendLong } = require('./commands/helpers');
@@ -273,6 +275,16 @@ const chartBuilder = new SlashCommandBuilder()
       ));
 slashCommands.push(chartBuilder.toJSON());
 
+// /sendnft: destination (required)
+const sendnftBuilder = new SlashCommandBuilder()
+  .setName('sendnft')
+  .setDescription(sendnftCmd.description)
+  .addStringOption(opt => opt
+    .setName('destination')
+    .setDescription('The Post Fiat address to send NFT(s) to')
+    .setRequired(true));
+slashCommands.push(sendnftBuilder.toJSON());
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -290,7 +302,7 @@ client.once('clientReady', async () => {
   try {
     console.log('Registering slash commands...');
     await rest.put(Routes.applicationCommands(client.user.id), { body: slashCommands });
-    const allNames = ['chat', 'postfiat', 'wallets', 'send', 'balance', 'mint', 'gallery', 'receive', 'onboard', 'trade', 'mytrades', 'menu', 'llmanalyze', 'faq', 'tradehistory', 'chart'].map(c => `/${c}`).join(', ');
+    const allNames = ['chat', 'postfiat', 'wallets', 'send', 'balance', 'mint', 'gallery', 'receive', 'onboard', 'trade', 'mytrades', 'menu', 'llmanalyze', 'faq', 'tradehistory', 'chart', 'sendnft'].map(c => `/${c}`).join(', ');
     console.log(`Registered ${slashCommands.length} slash commands: ${allNames}`);
   } catch (err) {
     console.error('Failed to register slash commands:', err);
@@ -426,6 +438,18 @@ client.on('interactionCreate', async (interaction) => {
       } catch (err) {
         console.error('[/tradehistory] Select menu failed:', err);
         const errorMsg = 'Something went wrong. Please try `/tradehistory` again.';
+        if (interaction.deferred || interaction.replied) {
+          await interaction.followUp({ content: errorMsg, flags: 64 }).catch(() => {});
+        } else {
+          await interaction.reply({ content: errorMsg, flags: 64 }).catch(() => {});
+        }
+      }
+    } else if (interaction.customId === 'sendnft_select') {
+      try {
+        await sendnftCmd.handleSelectMenu(interaction);
+      } catch (err) {
+        console.error('[/sendnft] Select menu failed:', err);
+        const errorMsg = 'Something went wrong. Please try `/sendnft` again.';
         if (interaction.deferred || interaction.replied) {
           await interaction.followUp({ content: errorMsg, flags: 64 }).catch(() => {});
         } else {

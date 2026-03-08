@@ -295,4 +295,92 @@ async function getNFTs(address) {
   }
 }
 
-module.exports = { generateWallet, airdropToWallet, sendPFT, getBalance, mintNFT, uploadToIPFS, getNFTs, loadWallet, PFT_TESTNET_WSS, PFT_NETWORK_ID };
+/**
+ * Create an NFT sell offer directed to a specific destination (amount 0 = free transfer).
+ * Returns the offer ID and transaction hash.
+ */
+async function createNFTSellOffer(ownerSeed, nftokenId, destinationAddress) {
+  const client = new xrpl.Client(PFT_TESTNET_WSS);
+  await client.connect();
+
+  try {
+    const wallet = loadWallet(ownerSeed);
+
+    const tx = {
+      TransactionType: 'NFTokenCreateOffer',
+      Account: wallet.classicAddress,
+      NFTokenID: nftokenId,
+      Amount: '0',
+      Flags: 1, // tfSellNFToken
+      Destination: destinationAddress,
+      NetworkID: PFT_NETWORK_ID,
+    };
+
+    const prepared = await client.autofill(tx);
+    const signed = wallet.sign(prepared);
+    const result = await client.submitAndWait(signed.tx_blob);
+
+    const txResult = result.result.meta.TransactionResult;
+    if (txResult !== 'tesSUCCESS') {
+      throw new Error(`Create sell offer failed: ${txResult}`);
+    }
+
+    // Extract offer ID from affected nodes
+    let offerId = null;
+    const affectedNodes = result.result.meta.AffectedNodes || [];
+    for (const node of affectedNodes) {
+      const created = node.CreatedNode;
+      if (created && created.LedgerEntryType === 'NFTokenOffer') {
+        offerId = created.LedgerIndex;
+        break;
+      }
+    }
+
+    return {
+      txHash: signed.hash,
+      offerId,
+      from: wallet.classicAddress,
+      to: destinationAddress,
+      nftokenId,
+    };
+  } finally {
+    await client.disconnect();
+  }
+}
+
+/**
+ * Accept an NFT sell offer. The caller (buyer) accepts a directed sell offer.
+ */
+async function acceptNFTOffer(buyerSeed, sellOfferId) {
+  const client = new xrpl.Client(PFT_TESTNET_WSS);
+  await client.connect();
+
+  try {
+    const wallet = loadWallet(buyerSeed);
+
+    const tx = {
+      TransactionType: 'NFTokenAcceptOffer',
+      Account: wallet.classicAddress,
+      NFTokenSellOffer: sellOfferId,
+      NetworkID: PFT_NETWORK_ID,
+    };
+
+    const prepared = await client.autofill(tx);
+    const signed = wallet.sign(prepared);
+    const result = await client.submitAndWait(signed.tx_blob);
+
+    const txResult = result.result.meta.TransactionResult;
+    if (txResult !== 'tesSUCCESS') {
+      throw new Error(`Accept offer failed: ${txResult}`);
+    }
+
+    return {
+      txHash: signed.hash,
+      offerId: sellOfferId,
+    };
+  } finally {
+    await client.disconnect();
+  }
+}
+
+module.exports = { generateWallet, airdropToWallet, sendPFT, getBalance, mintNFT, uploadToIPFS, getNFTs, loadWallet, createNFTSellOffer, acceptNFTOffer, PFT_TESTNET_WSS, PFT_NETWORK_ID };

@@ -129,6 +129,15 @@ function getWalletSeed(userId, address) {
   return decrypt(wallet.encryptedSeed);
 }
 
+function findUserByAddress(address) {
+  const store = loadStore();
+  for (const [userId, userData] of Object.entries(store)) {
+    const wallet = userData.wallets.find(w => w.address === address);
+    if (wallet) return { userId, address: wallet.address };
+  }
+  return null;
+}
+
 module.exports = {
   getUserWallets,
   addWallet,
@@ -136,4 +145,5 @@ module.exports = {
   setActiveWallet,
   getActiveWallet,
   getWalletSeed,
+  findUserByAddress,
 };

@@ -21,6 +21,7 @@ module.exports = {
       '`/receive` — Show wallet address(es).',
       '`/mint` — Mint an NFT on Post Fiat testnet.',
       '`/gallery` — View your minted NFTs.',
+      '`/sendnft` — Send NFTs from your gallery to another address.',
       '`/wallets` — list, create, import, delete, set-active.',
       '',
       '**━━━ Other ━━━**',
