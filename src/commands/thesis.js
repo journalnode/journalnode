@@ -52,6 +52,7 @@ module.exports = {
   name: 'thesis',
   description: 'Distill the latest B.O.B. thesis into structured data (Asset, Direction, Timeframe, Sizing).',
   needsEntries: false,
+  publicReply: true,
 
   async execute(interaction) {
     const channel = interaction.channel ?? await interaction.client.channels.fetch(interaction.channelId);
