@@ -284,6 +284,55 @@ function formatNum(n) {
   return `$${n.toLocaleString()}`;
 }
 
+function formatPrice(n) {
+  if (n >= 1000) return `$${Number(n.toFixed(2)).toLocaleString()}`;
+  if (n >= 1) return `$${n.toFixed(2)}`;
+  if (n >= 0.01) return `$${n.toFixed(4)}`;
+  if (n >= 0.0001) return `$${n.toFixed(6)}`;
+  return `$${n.toFixed(8)}`;
+}
+
+function parseOutputType(input) {
+  if (!input) return 'mcap';
+  const lower = input.toLowerCase().trim();
+  if (lower === 'both' || lower === '3') return 'both';
+  if (['price', 'price target', 'pt', '2'].includes(lower)) return 'price';
+  return 'mcap';
+}
+
+function parsePrice(text) {
+  const cleaned = text.replace(/,/g, '');
+  const match = cleaned.match(/\$?([\d]+(?:\.[\d]+)?)/);
+  if (match) {
+    const val = parseFloat(match[1]);
+    if (!isNaN(val) && val > 0) return val;
+  }
+  return null;
+}
+
+function parseBothValues(text) {
+  const cleaned = text.replace(/,/g, '');
+  let mcap = null, price = null;
+
+  const mcapMatch = cleaned.match(/MCAP:\s*\$?([\d.]+)\s*([TBMtbm])/i);
+  if (mcapMatch) {
+    const val = parseFloat(mcapMatch[1]);
+    const suffix = mcapMatch[2].toUpperCase();
+    mcap = suffix === 'T' ? val * 1e12 : suffix === 'B' ? val * 1e9 : val * 1e6;
+  }
+
+  const priceMatch = cleaned.match(/PRICE:\s*\$?([\d]+(?:\.[\d]+)?)/i);
+  if (priceMatch) price = parseFloat(priceMatch[1]);
+
+  return { mcap, price };
+}
+
+function outputTypeLabel(t) {
+  if (t === 'price') return 'Price Target';
+  if (t === 'both') return 'Market Cap & Price Target';
+  return 'Market Cap';
+}
+
 function parseNumber(text) {
   const cleaned = text.replace(/,/g, '');
   const trillionMatch = cleaned.match(/\$?([\d.]+)\s*[Tt](?:rillion)?/);
@@ -317,8 +366,27 @@ function bullishPrompt(assetDescription, horizon) {
   return `You are a financial analyst evaluating an investment pitch. Here is the user's description of the asset:\n\n"${assetDescription}"\n\nOver the next ${horizon}, are you bullish or bearish? Consider the pitch's merits, fundamentals, market conditions, and risks. You MUST respond with EXACTLY one word on the first line: either "BULLISH" or "BEARISH". Then on the next line, give a one-sentence explanation.`;
 }
 
-function valuationPrompt(asset, targetTime) {
-  return `You are a financial analyst. Estimate the total market capitalization of "${asset}" by ${targetTime}. Consider growth trends, adoption, competitive landscape, and macro factors. You MUST respond with EXACTLY one value on the first line in this format: $X.XXT or $X.XXB or $X.XXM (e.g. "$2.5T" or "$750B"). Then on the next line, give a one-sentence explanation.`;
+function valuationPrompt(assetOrPitch, targetTime, outputType = 'mcap') {
+  const isShortTicker = assetOrPitch.trim().length <= 20 && !/\s{2,}/.test(assetOrPitch.trim());
+  const assetContext = isShortTicker
+    ? `the asset "${assetOrPitch}"`
+    : `the following asset/pitch:\n\n"${assetOrPitch}"`;
+
+  if (outputType === 'price') {
+    return `You are a senior financial analyst providing a specific price target. Analyze ${assetContext} and estimate its per-unit price by ${targetTime}. Consider fundamentals, growth trends, adoption trajectory, competitive landscape, macro factors, and supply dynamics. Be as precise as possible — give your best-estimate price, not a range. You MUST respond with EXACTLY one value on the first line: a dollar amount (e.g. "$145.50", "$0.035", "$98500"). Then on the next line, give a one-sentence explanation of your key assumptions.`;
+  }
+
+  if (outputType === 'both') {
+    return `You are a senior financial analyst. Analyze ${assetContext} and estimate BOTH its total market capitalization AND per-unit price by ${targetTime}. Consider fundamentals, growth trends, adoption trajectory, competitive landscape, macro factors, and supply dynamics. Be as precise as possible.
+
+You MUST respond with EXACTLY two lines of values:
+Line 1: MCAP: $X.XXT or $X.XXB or $X.XXM (e.g. "MCAP: $2.5T")
+Line 2: PRICE: $X.XX (e.g. "PRICE: $145.50")
+Then on the next line, give a one-sentence explanation of your key assumptions.`;
+  }
+
+  // Default: mcap
+  return `You are a senior financial analyst. Estimate the total market capitalization of ${assetContext} by ${targetTime}. Consider fundamentals, growth trends, adoption trajectory, competitive landscape, macro factors, and supply dynamics. Be as precise as possible. You MUST respond with EXACTLY one value on the first line in this format: $X.XXT or $X.XXB or $X.XXM (e.g. "$2.5T" or "$750B"). Then on the next line, give a one-sentence explanation of your key assumptions.`;
 }
 
 function technicalPrompt(timeframe) {
@@ -436,25 +504,50 @@ async function runBullish(interaction, assetDescription, horizon, tradeId, payme
 
 // ─── Mode: Multi-Valuation — up to 8 models, progressive embed ───
 
-async function runMultiVal(interaction, asset, target, modelIds, tradeId, paymentTx) {
-  const systemPrompt = valuationPrompt(asset, target);
-  const userMsg = `Asset: ${asset}\nTarget: ${target}\n\nWhat is your market cap estimate?`;
+async function runMultiVal(interaction, asset, target, modelIds, tradeId, paymentTx, outputType = 'mcap') {
+  const systemPrompt = valuationPrompt(asset, target, outputType);
+  const assetLabel = asset.length > 60 ? asset.slice(0, 57) + '...' : asset;
+  const userMsg = outputType === 'both'
+    ? `Asset/Pitch: ${asset}\nTarget: ${target}\n\nProvide your market cap AND price target estimates.`
+    : outputType === 'price'
+      ? `Asset/Pitch: ${asset}\nTarget: ${target}\n\nWhat is your price target estimate?`
+      : `Asset/Pitch: ${asset}\nTarget: ${target}\n\nWhat is your market cap estimate?`;
 
   const details = [];
+
+  const fmtVal = (d) => {
+    if (outputType === 'both') {
+      const parts = [];
+      if (d.mcap) parts.push(`MCap: ${formatNum(d.mcap)}`);
+      if (d.price) parts.push(`Price: ${formatPrice(d.price)}`);
+      return parts.length > 0 ? parts.join(' | ') : 'N/A';
+    }
+    if (outputType === 'price') return d.price ? formatPrice(d.price) : 'N/A';
+    return d.mcap ? formatNum(d.mcap) : 'N/A';
+  };
 
   const buildEmbed = (complete = false) => {
     const embed = new EmbedBuilder()
       .setTitle('Multi-Valuation — Results')
       .setColor(0x6366f1);
 
-    let desc = `**Asset:** ${asset}\n**Target:** ${target}\n`;
+    let desc = `**Asset:** ${assetLabel}\n**Target:** ${target}\n**Output:** ${outputTypeLabel(outputType)}\n`;
     if (paymentTx) desc += `**Payment:** [View TX](${paymentTx.txUrl}) (${LLM_FEE_PFT} PFT)\n`;
 
     if (complete) {
-      const validValues = details.filter(d => d.value).map(d => d.value);
-      if (validValues.length > 0) {
-        const avg = validValues.reduce((a, b) => a + b, 0) / validValues.length;
-        desc += `**Avg Estimate:** ${formatNum(avg)} (${details.filter(d => d.value).length} models)\n`;
+      if (outputType === 'mcap' || outputType === 'both') {
+        const validMcaps = details.filter(d => d.mcap).map(d => d.mcap);
+        if (validMcaps.length > 0) {
+          const avg = validMcaps.reduce((a, b) => a + b, 0) / validMcaps.length;
+          desc += `**Avg Market Cap:** ${formatNum(avg)} (${validMcaps.length} models)\n`;
+        }
+      }
+      if (outputType === 'price' || outputType === 'both') {
+        const validPrices = details.filter(d => d.price).map(d => d.price);
+        if (validPrices.length > 0) {
+          const avg = validPrices.reduce((a, b) => a + b, 0) / validPrices.length;
+          desc += `**Avg Price Target:** ${formatPrice(avg)} (${validPrices.length} models)\n`;
+        }
       }
     } else {
       desc += `**Progress:** ${details.length}/${modelIds.length} models responded...\n`;
@@ -462,7 +555,7 @@ async function runMultiVal(interaction, asset, target, modelIds, tradeId, paymen
     desc += '\n';
 
     for (const d of details) {
-      desc += `📊 **${d.model}:** ${d.value ? formatNum(d.value) : 'N/A'}${d.explanation ? '  ' + d.explanation : ''}\n`;
+      desc += `📊 **${d.model}:** ${fmtVal(d)}${d.explanation ? '  ' + d.explanation : ''}\n`;
     }
 
     embed.setDescription(desc.slice(0, 4090));
@@ -474,11 +567,19 @@ async function runMultiVal(interaction, asset, target, modelIds, tradeId, paymen
   const promises = modelIds.map(async (id) => {
     const model = getModelById(id);
     try {
-      const response = await callModel(id, systemPrompt, userMsg, { maxTokens: 200 });
-      const value = parseNumber(response);
-      details.push({ model: model?.name || id, value, explanation: extractExplanation(response) });
+      const response = await callModel(id, systemPrompt, userMsg, { maxTokens: 300 });
+      if (outputType === 'both') {
+        const { mcap, price } = parseBothValues(response);
+        details.push({ model: model?.name || id, mcap, price, explanation: extractExplanation(response) });
+      } else if (outputType === 'price') {
+        const price = parsePrice(response);
+        details.push({ model: model?.name || id, mcap: null, price, explanation: extractExplanation(response) });
+      } else {
+        const mcap = parseNumber(response);
+        details.push({ model: model?.name || id, mcap, price: null, explanation: extractExplanation(response) });
+      }
     } catch (err) {
-      details.push({ model: model?.name || id, value: null, explanation: '' });
+      details.push({ model: model?.name || id, mcap: null, price: null, explanation: '' });
     }
   });
 
@@ -496,16 +597,36 @@ async function runMultiVal(interaction, asset, target, modelIds, tradeId, paymen
     if (done) break;
   }
 
-  const labels = [], values = [];
-  for (const d of details) {
-    if (d.value) { labels.push(d.model); values.push(d.value); }
+  // Generate chart(s)
+  const files = [];
+  const finalEmbed = buildEmbed(true);
+
+  if (outputType === 'mcap' || outputType === 'both') {
+    const labels = [], values = [];
+    for (const d of details) { if (d.mcap) { labels.push(d.model); values.push(d.mcap); } }
+    if (labels.length > 0) {
+      const chartBuf = await fetchChart(barChart(`Market Cap Estimates — ${target}`, labels, values, 'Market Cap'));
+      files.push(new AttachmentBuilder(chartBuf, { name: 'mcap_chart.png' }));
+      finalEmbed.setImage('attachment://mcap_chart.png');
+    }
   }
 
-  const chartBuf = await fetchChart(barChart(`Market Cap Estimates — ${target}`, labels, values, 'Market Cap'));
-  const file = new AttachmentBuilder(chartBuf, { name: 'multival.png' });
-  const finalEmbed = buildEmbed(true);
-  finalEmbed.setImage('attachment://multival.png');
-  await interaction.editReply({ embeds: [finalEmbed], files: [file] });
+  if (outputType === 'price' || outputType === 'both') {
+    const labels = [], values = [];
+    for (const d of details) { if (d.price) { labels.push(d.model); values.push(d.price); } }
+    if (labels.length > 0) {
+      const chartBuf = await fetchChart(barChart(`Price Target Estimates — ${target}`, labels, values, 'Price'));
+      files.push(new AttachmentBuilder(chartBuf, { name: 'price_chart.png' }));
+      if (outputType === 'price') finalEmbed.setImage('attachment://price_chart.png');
+    }
+  }
+
+  await interaction.editReply({ embeds: [finalEmbed], files });
+
+  // For "both" mode, send price chart as followUp since embed only supports one image
+  if (outputType === 'both' && files.length > 1) {
+    await interaction.followUp({ files: [files[1]] }).catch(() => {});
+  }
 
   if (tradeId) {
     saveAnalysis(interaction.user.id, {
@@ -513,6 +634,7 @@ async function runMultiVal(interaction, asset, target, modelIds, tradeId, paymen
       mode: 'multival',
       asset,
       target,
+      outputType,
       result: { details },
     });
   }
@@ -520,31 +642,56 @@ async function runMultiVal(interaction, asset, target, modelIds, tradeId, paymen
 
 // ─── Mode: Solo-Valuation — 1 model, N runs, progressive embed ───
 
-async function runSoloVal(interaction, asset, target, modelId, runs, tradeId, paymentTx) {
+async function runSoloVal(interaction, asset, target, modelId, runs, tradeId, paymentTx, outputType = 'mcap') {
   const model = getModelById(modelId);
   const modelName = model?.name || modelId;
-  const systemPrompt = valuationPrompt(asset, target);
-  const userMsg = `Asset: ${asset}\nTarget: ${target}\n\nWhat is your market cap estimate?`;
+  const assetLabel = asset.length > 60 ? asset.slice(0, 57) + '...' : asset;
+  const systemPrompt = valuationPrompt(asset, target, outputType);
+  const userMsg = outputType === 'both'
+    ? `Asset/Pitch: ${asset}\nTarget: ${target}\n\nProvide your market cap AND price target estimates.`
+    : outputType === 'price'
+      ? `Asset/Pitch: ${asset}\nTarget: ${target}\n\nWhat is your price target estimate?`
+      : `Asset/Pitch: ${asset}\nTarget: ${target}\n\nWhat is your market cap estimate?`;
 
+  // Each run stores { mcap, price } to support all output modes
   const runResults = [];
 
-  const buildEmbed = (complete = false, mean = 0, median = 0) => {
+  const calcStats = (arr) => {
+    const sorted = [...arr].sort((a, b) => a - b);
+    const mean = arr.reduce((a, b) => a + b, 0) / arr.length;
+    const median = sorted.length % 2 === 0
+      ? (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2
+      : sorted[Math.floor(sorted.length / 2)];
+    return { mean, median };
+  };
+
+  const buildEmbed = (complete = false, mcapStats = null, priceStats = null) => {
     const embed = new EmbedBuilder()
       .setTitle('Solo-Valuation — Results')
       .setColor(0x6366f1);
 
-    let desc = `**Asset:** ${asset}\n**Target:** ${target}\n**Model:** ${modelName}\n`;
+    let desc = `**Asset:** ${assetLabel}\n**Target:** ${target}\n**Model:** ${modelName}\n**Output:** ${outputTypeLabel(outputType)}\n`;
     if (paymentTx) desc += `**Payment:** [View TX](${paymentTx.txUrl}) (${LLM_FEE_PFT} PFT)\n`;
 
-    if (complete && runResults.length > 0) {
-      desc += `**Mean:** ${formatNum(mean)} | **Median:** ${formatNum(median)}\n`;
+    if (complete) {
+      if (mcapStats) desc += `**MCap Mean:** ${formatNum(mcapStats.mean)} | **Median:** ${formatNum(mcapStats.median)}\n`;
+      if (priceStats) desc += `**Price Mean:** ${formatPrice(priceStats.mean)} | **Median:** ${formatPrice(priceStats.median)}\n`;
     } else {
       desc += `**Progress:** ${runResults.length}/${runs} runs completed...\n`;
     }
     desc += '\n';
 
-    runResults.forEach((v, i) => {
-      desc += `Run ${i + 1}: ${v ? formatNum(v) : 'N/A'}\n`;
+    runResults.forEach((r, i) => {
+      if (outputType === 'both') {
+        const parts = [];
+        if (r.mcap) parts.push(`MCap: ${formatNum(r.mcap)}`);
+        if (r.price) parts.push(`Price: ${formatPrice(r.price)}`);
+        desc += `Run ${i + 1}: ${parts.length > 0 ? parts.join(' | ') : 'N/A'}\n`;
+      } else if (outputType === 'price') {
+        desc += `Run ${i + 1}: ${r.price ? formatPrice(r.price) : 'N/A'}\n`;
+      } else {
+        desc += `Run ${i + 1}: ${r.mcap ? formatNum(r.mcap) : 'N/A'}\n`;
+      }
     });
 
     embed.setDescription(desc.slice(0, 4090));
@@ -555,11 +702,17 @@ async function runSoloVal(interaction, asset, target, modelId, runs, tradeId, pa
 
   const promises = Array.from({ length: runs }, async (_, i) => {
     try {
-      const response = await callModel(modelId, systemPrompt, userMsg, { maxTokens: 200 });
-      const val = parseNumber(response);
-      runResults.push(val);
+      const response = await callModel(modelId, systemPrompt, userMsg, { maxTokens: 300 });
+      if (outputType === 'both') {
+        const { mcap, price } = parseBothValues(response);
+        runResults.push({ mcap, price });
+      } else if (outputType === 'price') {
+        runResults.push({ mcap: null, price: parsePrice(response) });
+      } else {
+        runResults.push({ mcap: parseNumber(response), price: null });
+      }
     } catch (err) {
-      runResults.push(null);
+      runResults.push({ mcap: null, price: null });
     }
   });
 
@@ -577,8 +730,11 @@ async function runSoloVal(interaction, asset, target, modelId, runs, tradeId, pa
     if (done) break;
   }
 
-  const values = runResults.filter(v => v !== null);
-  if (values.length === 0) {
+  // Compute stats
+  const mcapValues = runResults.map(r => r.mcap).filter(v => v !== null);
+  const priceValues = runResults.map(r => r.price).filter(v => v !== null);
+
+  if (mcapValues.length === 0 && priceValues.length === 0) {
     const errorEmbed = new EmbedBuilder()
       .setTitle('Solo-Valuation — Results')
       .setColor(0xef4444)
@@ -587,18 +743,32 @@ async function runSoloVal(interaction, asset, target, modelId, runs, tradeId, pa
     return;
   }
 
-  const labels = values.map((_, i) => `Run ${i + 1}`);
-  const sorted = [...values].sort((a, b) => a - b);
-  const mean = values.reduce((a, b) => a + b, 0) / values.length;
-  const median = sorted.length % 2 === 0
-    ? (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2
-    : sorted[Math.floor(sorted.length / 2)];
+  const mcapStats = mcapValues.length > 0 ? calcStats(mcapValues) : null;
+  const priceStats = priceValues.length > 0 ? calcStats(priceValues) : null;
 
-  const chartBuf = await fetchChart(barChartWithStats(`${modelName} — ${runs} runs — ${target}`, labels, values, mean, median));
-  const file = new AttachmentBuilder(chartBuf, { name: 'soloval.png' });
-  const finalEmbed = buildEmbed(true, mean, median);
-  finalEmbed.setImage('attachment://soloval.png');
-  await interaction.editReply({ embeds: [finalEmbed], files: [file] });
+  // Generate chart(s)
+  const files = [];
+  const finalEmbed = buildEmbed(true, mcapStats, priceStats);
+
+  if ((outputType === 'mcap' || outputType === 'both') && mcapValues.length > 0) {
+    const labels = mcapValues.map((_, i) => `Run ${i + 1}`);
+    const chartBuf = await fetchChart(barChartWithStats(`${modelName} — ${runs} runs — MCap — ${target}`, labels, mcapValues, mcapStats.mean, mcapStats.median));
+    files.push(new AttachmentBuilder(chartBuf, { name: 'mcap_chart.png' }));
+    finalEmbed.setImage('attachment://mcap_chart.png');
+  }
+
+  if ((outputType === 'price' || outputType === 'both') && priceValues.length > 0) {
+    const labels = priceValues.map((_, i) => `Run ${i + 1}`);
+    const chartBuf = await fetchChart(barChartWithStats(`${modelName} — ${runs} runs — Price — ${target}`, labels, priceValues, priceStats.mean, priceStats.median));
+    files.push(new AttachmentBuilder(chartBuf, { name: 'price_chart.png' }));
+    if (outputType === 'price') finalEmbed.setImage('attachment://price_chart.png');
+  }
+
+  await interaction.editReply({ embeds: [finalEmbed], files });
+
+  if (outputType === 'both' && files.length > 1) {
+    await interaction.followUp({ files: [files[1]] }).catch(() => {});
+  }
 
   if (tradeId) {
     saveAnalysis(interaction.user.id, {
@@ -607,7 +777,12 @@ async function runSoloVal(interaction, asset, target, modelId, runs, tradeId, pa
       asset,
       target,
       model: modelName,
-      result: { mean, median, runResults: values },
+      outputType,
+      result: {
+        mcapMean: mcapStats?.mean, mcapMedian: mcapStats?.median,
+        priceMean: priceStats?.mean, priceMedian: priceStats?.median,
+        runResults: runResults,
+      },
     });
   }
 }
@@ -835,10 +1010,11 @@ module.exports = {
       .setDescription(
         'Pick a mode (each analysis costs **1 PFT**):\n\n' +
         '**A) Bullish or Bearish** — Pitch an asset to all 18 models. Pie chart.\n' +
-        '**B) Multi-Valuation** — Pick up to 8 models for market cap estimates. Bar chart.\n' +
-        '**C) Solo-Valuation** — Run 1 model up to 5 times to test consistency. Bar chart.\n' +
+        '**B) Multi-Valuation** — Pick up to 8 models. Market cap, price target, or both.\n' +
+        '**C) Solo-Valuation** — Run 1 model up to 5× for consistency. Market cap, price, or both.\n' +
         '**D) Technical Analyst** — Vision models analyze your chart screenshot. Long/Short.\n' +
-        '**E) B.O.B. Thesis** — Ingest the latest B.O.B. trading thesis for analysis.'
+        '**E) B.O.B. Thesis** — Ingest the latest B.O.B. trading thesis for analysis.\n\n' +
+        '*Tip: B & C accept asset names (BTC) or full investment pitches.*'
       );
 
     const row1 = new ActionRowBuilder().addComponents(
@@ -918,7 +1094,13 @@ module.exports = {
         if (trade) prefillAsset = trade.asset;
       }
 
-      const assetInput = new TextInputBuilder().setCustomId('asset').setLabel('Asset (e.g. BTC, ETH, AAPL)').setStyle(TextInputStyle.Short).setRequired(true);
+      const assetInput = new TextInputBuilder()
+        .setCustomId('asset')
+        .setLabel('Asset name or pitch')
+        .setStyle(TextInputStyle.Paragraph)
+        .setPlaceholder('e.g. "BTC" or "Solana is a high-performance L1 blockchain with growing DeFi TVL..."')
+        .setRequired(true)
+        .setMaxLength(500);
       if (prefillAsset) assetInput.setValue(prefillAsset);
 
       const modal = new ModalBuilder()
@@ -928,6 +1110,9 @@ module.exports = {
           new ActionRowBuilder().addComponents(assetInput),
           new ActionRowBuilder().addComponents(
             new TextInputBuilder().setCustomId('target').setLabel('Target (e.g. Q3 2026, EOY 2027)').setStyle(TextInputStyle.Short).setRequired(true)
+          ),
+          new ActionRowBuilder().addComponents(
+            new TextInputBuilder().setCustomId('output_type').setLabel('Output: mcap, price, or both (default: mcap)').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('mcap')
           ),
         );
       await interaction.showModal(modal);
@@ -940,7 +1125,13 @@ module.exports = {
         if (trade) prefillAsset = trade.asset;
       }
 
-      const assetInput = new TextInputBuilder().setCustomId('asset').setLabel('Asset (e.g. BTC, ETH, AAPL)').setStyle(TextInputStyle.Short).setRequired(true);
+      const assetInput = new TextInputBuilder()
+        .setCustomId('asset')
+        .setLabel('Asset name or pitch')
+        .setStyle(TextInputStyle.Paragraph)
+        .setPlaceholder('e.g. "ETH" or "Ethereum has strong DeFi ecosystem and upcoming scaling upgrades..."')
+        .setRequired(true)
+        .setMaxLength(500);
       if (prefillAsset) assetInput.setValue(prefillAsset);
 
       const modal = new ModalBuilder()
@@ -953,6 +1144,9 @@ module.exports = {
           ),
           new ActionRowBuilder().addComponents(
             new TextInputBuilder().setCustomId('runs').setLabel('Number of runs (1-5, default 3)').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('3')
+          ),
+          new ActionRowBuilder().addComponents(
+            new TextInputBuilder().setCustomId('output_type').setLabel('Output: mcap, price, or both (default: mcap)').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('mcap')
           ),
         );
       await interaction.showModal(modal);
@@ -1038,7 +1232,7 @@ module.exports = {
       // Store mode so handleModalSubmit picks it up
       pendingAnalysis.set(interaction.user.id, { ...pending, mode: 'bob_multival_prefill' });
 
-      const assetInput = new TextInputBuilder().setCustomId('asset').setLabel('Asset (e.g. BTC, ETH, AAPL)').setStyle(TextInputStyle.Short).setRequired(true).setValue(thesis.asset.slice(0, 50));
+      const assetInput = new TextInputBuilder().setCustomId('asset').setLabel('Asset name or pitch').setStyle(TextInputStyle.Paragraph).setRequired(true).setValue(thesis.asset.slice(0, 500)).setMaxLength(500);
       const targetInput = new TextInputBuilder().setCustomId('target').setLabel('Target (e.g. Q3 2026, EOY 2027)').setStyle(TextInputStyle.Short).setRequired(true);
       if (thesis.timeframe && thesis.timeframe !== 'Not specified') targetInput.setValue(thesis.timeframe.slice(0, 50));
 
@@ -1048,6 +1242,9 @@ module.exports = {
         .addComponents(
           new ActionRowBuilder().addComponents(assetInput),
           new ActionRowBuilder().addComponents(targetInput),
+          new ActionRowBuilder().addComponents(
+            new TextInputBuilder().setCustomId('output_type').setLabel('Output: mcap, price, or both (default: mcap)').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('mcap')
+          ),
         );
       await interaction.showModal(modal);
 
@@ -1060,7 +1257,7 @@ module.exports = {
       const thesis = pending.bobThesis;
       pendingAnalysis.set(interaction.user.id, { ...pending, mode: 'bob_soloval_prefill' });
 
-      const assetInput = new TextInputBuilder().setCustomId('asset').setLabel('Asset (e.g. BTC, ETH, AAPL)').setStyle(TextInputStyle.Short).setRequired(true).setValue(thesis.asset.slice(0, 50));
+      const assetInput = new TextInputBuilder().setCustomId('asset').setLabel('Asset name or pitch').setStyle(TextInputStyle.Paragraph).setRequired(true).setValue(thesis.asset.slice(0, 500)).setMaxLength(500);
       const targetInput = new TextInputBuilder().setCustomId('target').setLabel('Target (e.g. Q3 2026, EOY 2027)').setStyle(TextInputStyle.Short).setRequired(true);
       if (thesis.timeframe && thesis.timeframe !== 'Not specified') targetInput.setValue(thesis.timeframe.slice(0, 50));
 
@@ -1072,6 +1269,9 @@ module.exports = {
           new ActionRowBuilder().addComponents(targetInput),
           new ActionRowBuilder().addComponents(
             new TextInputBuilder().setCustomId('runs').setLabel('Number of runs (1-5, default 3)').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('3')
+          ),
+          new ActionRowBuilder().addComponents(
+            new TextInputBuilder().setCustomId('output_type').setLabel('Output: mcap, price, or both (default: mcap)').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('mcap')
           ),
         );
       await interaction.showModal(modal);
@@ -1170,22 +1370,28 @@ module.exports = {
     } else if (id === 'llma_multival_modal') {
       const asset = interaction.fields.getTextInputValue('asset');
       const target = interaction.fields.getTextInputValue('target');
+      const outputTypeRaw = interaction.fields.getTextInputValue('output_type');
+      const outputType = parseOutputType(outputTypeRaw);
       const existing = pendingAnalysis.get(interaction.user.id) || {};
-      pendingAnalysis.set(interaction.user.id, { ...existing, mode: 'multival', asset, target, tradeId: existing.tradeId || null });
+      pendingAnalysis.set(interaction.user.id, { ...existing, mode: 'multival', asset, target, outputType, tradeId: existing.tradeId || null });
       await interaction.deferReply();
+      const assetLabel = asset.length > 60 ? asset.slice(0, 57) + '...' : asset;
       const row = buildModelSelectMenu('llmanalyze_model_select', 8, false);
-      await interaction.editReply({ content: `Select up to 8 models for **${asset}** valuation by **${target}**:`, components: [row] });
+      await interaction.editReply({ content: `Select up to 8 models for **${assetLabel}** ${outputTypeLabel(outputType).toLowerCase()} by **${target}**:`, components: [row] });
 
     } else if (id === 'llma_soloval_modal') {
       const asset = interaction.fields.getTextInputValue('asset');
       const target = interaction.fields.getTextInputValue('target');
       const runsStr = interaction.fields.getTextInputValue('runs');
       const runs = Math.min(5, Math.max(1, parseInt(runsStr) || 3));
+      const outputTypeRaw = interaction.fields.getTextInputValue('output_type');
+      const outputType = parseOutputType(outputTypeRaw);
       const existing = pendingAnalysis.get(interaction.user.id) || {};
-      pendingAnalysis.set(interaction.user.id, { ...existing, mode: 'soloval', asset, target, runs, tradeId: existing.tradeId || null });
+      pendingAnalysis.set(interaction.user.id, { ...existing, mode: 'soloval', asset, target, runs, outputType, tradeId: existing.tradeId || null });
       await interaction.deferReply();
+      const assetLabel = asset.length > 60 ? asset.slice(0, 57) + '...' : asset;
       const row = buildModelSelectMenu('llmanalyze_model_select', 1, false);
-      await interaction.editReply({ content: `Select a model for **${asset}** solo-valuation (${runs} runs) by **${target}**:`, components: [row] });
+      await interaction.editReply({ content: `Select a model for **${assetLabel}** solo ${outputTypeLabel(outputType).toLowerCase()} (${runs} runs) by **${target}**:`, components: [row] });
 
     } else if (id === 'llma_technical_modal') {
       const timeframe = interaction.fields.getTextInputValue('timeframe');
@@ -1334,11 +1540,11 @@ module.exports = {
     if (pending.mode === 'multival') {
       const paymentTx = await collectPayment(interaction, 'Multi-Valuation');
       if (!paymentTx) return;
-      await runMultiVal(interaction, pending.asset, pending.target, selectedModels, pending.tradeId, paymentTx);
+      await runMultiVal(interaction, pending.asset, pending.target, selectedModels, pending.tradeId, paymentTx, pending.outputType || 'mcap');
     } else if (pending.mode === 'soloval') {
       const paymentTx = await collectPayment(interaction, 'Solo-Valuation');
       if (!paymentTx) return;
-      await runSoloVal(interaction, pending.asset, pending.target, selectedModels[0], pending.runs, pending.tradeId, paymentTx);
+      await runSoloVal(interaction, pending.asset, pending.target, selectedModels[0], pending.runs, pending.tradeId, paymentTx, pending.outputType || 'mcap');
     }
   },
 
