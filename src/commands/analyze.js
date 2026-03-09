@@ -1588,4 +1588,24 @@ module.exports = {
   },
 
   pendingAnalysis,
+
+  // Shared helpers for /compare command
+  collectPayment,
+  fetchChart,
+  pieChart,
+  barChart,
+  barChartWithStats,
+  formatNum,
+  formatPrice,
+  parseNumber,
+  parsePrice,
+  parseBothValues,
+  parseOutputType,
+  outputTypeLabel,
+  parseSentiment,
+  extractExplanation,
+  buildModelSelectMenu,
+  valuationPrompt,
+  bullishPrompt,
+  LLM_FEE_PFT,
 };

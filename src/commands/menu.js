@@ -12,6 +12,7 @@ module.exports = {
       '`/mytrades` — View active trades, close positions with P&L and reflection.',
       '`/llmanalyze` — AI-powered market analysis (bullish/bearish, valuations, technical).',
       '`/thesis` — Distill the latest B.O.B. thesis into structured data.',
+      '`/compare` — Side-by-side LLM analysis comparing two assets.',
       '`/chart` — Display a candlestick chart (crypto or stocks) from Hyperliquid.',
       '',
       '**━━━ Post Fiat Suite ━━━**',

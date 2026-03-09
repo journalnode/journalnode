@@ -49,6 +49,8 @@ const sendnftCmd = require('./commands/sendnft');
 commands.set(sendnftCmd.name, sendnftCmd);
 const thesisCmd = require('./commands/thesis');
 commands.set(thesisCmd.name, thesisCmd);
+const compareCmd = require('./commands/compare');
+commands.set(compareCmd.name, compareCmd);
 
 const { chat: llmChat } = require('./openrouter');
 const { formatEntries, summarizeStats, sendLong } = require('./commands/helpers');
@@ -293,6 +295,12 @@ const thesisBuilder = new SlashCommandBuilder()
   .setDescription(thesisCmd.description);
 slashCommands.push(thesisBuilder.toJSON());
 
+// /compare: no options — shows mode buttons
+const compareBuilder = new SlashCommandBuilder()
+  .setName('compare')
+  .setDescription(compareCmd.description);
+slashCommands.push(compareBuilder.toJSON());
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -310,7 +318,7 @@ client.once('clientReady', async () => {
   try {
     console.log('Registering slash commands...');
     await rest.put(Routes.applicationCommands(client.user.id), { body: slashCommands });
-    const allNames = ['chat', 'postfiat', 'wallets', 'send', 'balance', 'mint', 'gallery', 'receive', 'onboard', 'trade', 'mytrades', 'menu', 'llmanalyze', 'faq', 'tradehistory', 'chart', 'sendnft', 'thesis'].map(c => `/${c}`).join(', ');
+    const allNames = ['chat', 'postfiat', 'wallets', 'send', 'balance', 'mint', 'gallery', 'receive', 'onboard', 'trade', 'mytrades', 'menu', 'llmanalyze', 'faq', 'tradehistory', 'chart', 'sendnft', 'thesis', 'compare'].map(c => `/${c}`).join(', ');
     console.log(`Registered ${slashCommands.length} slash commands: ${allNames}`);
   } catch (err) {
     console.error('Failed to register slash commands:', err);
@@ -362,6 +370,18 @@ client.on('interactionCreate', async (interaction) => {
       } catch (err) {
         console.error('[/llmanalyze] Modal submit failed:', err);
         const errorMsg = 'Something went wrong. Please try `/llmanalyze` again.';
+        if (interaction.deferred || interaction.replied) {
+          await interaction.followUp({ content: errorMsg, flags: 64 }).catch(() => {});
+        } else {
+          await interaction.reply({ content: errorMsg, flags: 64 }).catch(() => {});
+        }
+      }
+    } else if (interaction.customId.startsWith('cmp_') && interaction.customId.endsWith('_modal')) {
+      try {
+        await compareCmd.handleModalSubmit(interaction);
+      } catch (err) {
+        console.error('[/compare] Modal submit failed:', err);
+        const errorMsg = 'Something went wrong. Please try `/compare` again.';
         if (interaction.deferred || interaction.replied) {
           await interaction.followUp({ content: errorMsg, flags: 64 }).catch(() => {});
         } else {
@@ -434,6 +454,18 @@ client.on('interactionCreate', async (interaction) => {
           await interaction.reply({ content: errorMsg, flags: 64 }).catch(() => {});
         }
       }
+    } else if (interaction.customId.startsWith('cmp_')) {
+      try {
+        await compareCmd.handleButton(interaction);
+      } catch (err) {
+        console.error('[/compare] Button handler failed:', err);
+        const errorMsg = 'Something went wrong. Please try `/compare` again.';
+        if (interaction.deferred || interaction.replied) {
+          await interaction.followUp({ content: errorMsg, flags: 64 }).catch(() => {});
+        } else {
+          await interaction.reply({ content: errorMsg, flags: 64 }).catch(() => {});
+        }
+      }
     }
     return;
   }
@@ -470,6 +502,18 @@ client.on('interactionCreate', async (interaction) => {
       } catch (err) {
         console.error('[/llmanalyze] Model select failed:', err);
         const errorMsg = 'Something went wrong processing your model selection. Please try `/llmanalyze` again.';
+        if (interaction.deferred || interaction.replied) {
+          await interaction.followUp({ content: errorMsg, flags: 64 }).catch(() => {});
+        } else {
+          await interaction.reply({ content: errorMsg, flags: 64 }).catch(() => {});
+        }
+      }
+    } else if (interaction.customId === 'compare_model_select') {
+      try {
+        await compareCmd.handleSelectMenu(interaction);
+      } catch (err) {
+        console.error('[/compare] Model select failed:', err);
+        const errorMsg = 'Something went wrong processing your model selection. Please try `/compare` again.';
         if (interaction.deferred || interaction.replied) {
           await interaction.followUp({ content: errorMsg, flags: 64 }).catch(() => {});
         } else {
