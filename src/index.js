@@ -51,6 +51,8 @@ const thesisCmd = require('./commands/thesis');
 commands.set(thesisCmd.name, thesisCmd);
 const compareCmd = require('./commands/compare');
 commands.set(compareCmd.name, compareCmd);
+const watchlistCmd = require('./commands/watchlist');
+commands.set(watchlistCmd.name, watchlistCmd);
 
 const { chat: llmChat } = require('./openrouter');
 const { formatEntries, summarizeStats, sendLong } = require('./commands/helpers');
@@ -301,6 +303,29 @@ const compareBuilder = new SlashCommandBuilder()
   .setDescription(compareCmd.description);
 slashCommands.push(compareBuilder.toJSON());
 
+// /watchlist: add, remove, view subcommands
+const watchlistBuilder = new SlashCommandBuilder()
+  .setName('watchlist')
+  .setDescription(watchlistCmd.description)
+  .addSubcommand(sub => sub
+    .setName('add')
+    .setDescription('Add an asset to your watchlist.')
+    .addStringOption(opt => opt
+      .setName('ticker')
+      .setDescription('Asset ticker (e.g. BTC, ETH, SOL, NVDA)')
+      .setRequired(true)))
+  .addSubcommand(sub => sub
+    .setName('remove')
+    .setDescription('Remove an asset from your watchlist.')
+    .addStringOption(opt => opt
+      .setName('ticker')
+      .setDescription('Asset ticker to remove')
+      .setRequired(true)))
+  .addSubcommand(sub => sub
+    .setName('view')
+    .setDescription('View your watchlist with live prices.'));
+slashCommands.push(watchlistBuilder.toJSON());
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -318,7 +343,7 @@ client.once('clientReady', async () => {
   try {
     console.log('Registering slash commands...');
     await rest.put(Routes.applicationCommands(client.user.id), { body: slashCommands });
-    const allNames = ['chat', 'postfiat', 'wallets', 'send', 'balance', 'mint', 'gallery', 'receive', 'onboard', 'trade', 'mytrades', 'menu', 'llmanalyze', 'faq', 'tradehistory', 'chart', 'sendnft', 'thesis', 'compare'].map(c => `/${c}`).join(', ');
+    const allNames = ['chat', 'postfiat', 'wallets', 'send', 'balance', 'mint', 'gallery', 'receive', 'onboard', 'trade', 'mytrades', 'menu', 'llmanalyze', 'faq', 'tradehistory', 'chart', 'sendnft', 'thesis', 'compare', 'watchlist'].map(c => `/${c}`).join(', ');
     console.log(`Registered ${slashCommands.length} slash commands: ${allNames}`);
   } catch (err) {
     console.error('Failed to register slash commands:', err);
@@ -514,6 +539,18 @@ client.on('interactionCreate', async (interaction) => {
       } catch (err) {
         console.error('[/compare] Model select failed:', err);
         const errorMsg = 'Something went wrong processing your model selection. Please try `/compare` again.';
+        if (interaction.deferred || interaction.replied) {
+          await interaction.followUp({ content: errorMsg, flags: 64 }).catch(() => {});
+        } else {
+          await interaction.reply({ content: errorMsg, flags: 64 }).catch(() => {});
+        }
+      }
+    } else if (interaction.customId === 'wl_chart_asset' || interaction.customId.startsWith('wl_chart_tf_')) {
+      try {
+        await watchlistCmd.handleSelectMenu(interaction);
+      } catch (err) {
+        console.error('[/watchlist] Select menu failed:', err);
+        const errorMsg = 'Something went wrong. Please try `/watchlist view` again.';
         if (interaction.deferred || interaction.replied) {
           await interaction.followUp({ content: errorMsg, flags: 64 }).catch(() => {});
         } else {
