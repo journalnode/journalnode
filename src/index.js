@@ -291,10 +291,18 @@ const sendnftBuilder = new SlashCommandBuilder()
     .setRequired(true));
 slashCommands.push(sendnftBuilder.toJSON());
 
-// /thesis: no options needed
+// /thesis: optional start_date and end_date for multi-day analysis
 const thesisBuilder = new SlashCommandBuilder()
   .setName('thesis')
-  .setDescription(thesisCmd.description);
+  .setDescription(thesisCmd.description)
+  .addStringOption(opt => opt
+    .setName('start_date')
+    .setDescription('Start date for multi-day analysis (YYYY-MM-DD)')
+    .setRequired(false))
+  .addStringOption(opt => opt
+    .setName('end_date')
+    .setDescription('End date for multi-day analysis (YYYY-MM-DD)')
+    .setRequired(false));
 slashCommands.push(thesisBuilder.toJSON());
 
 // /compare: no options — shows mode buttons
