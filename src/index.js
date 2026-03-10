@@ -419,7 +419,19 @@ client.on('interactionCreate', async (interaction) => {
 
   // Handle button interactions
   if (interaction.isButton()) {
-    if (interaction.customId.startsWith('close_trade_')) {
+    if (interaction.customId === 'chart_analyze') {
+      try {
+        await chartCmd.handleAnalysisButton(interaction);
+      } catch (err) {
+        console.error('[chart] AI Analysis button failed:', err);
+        const errorMsg = 'Something went wrong running the AI analysis. Please try again.';
+        if (interaction.deferred || interaction.replied) {
+          await interaction.followUp({ content: errorMsg, flags: 64 }).catch(() => {});
+        } else {
+          await interaction.reply({ content: errorMsg, flags: 64 }).catch(() => {});
+        }
+      }
+    } else if (interaction.customId.startsWith('close_trade_')) {
       try {
         await mytradesCmd.handleCloseButton(interaction);
       } catch (err) {
@@ -627,8 +639,18 @@ client.on('messageCreate', async (message) => {
     const purposeData = getUserPurpose(message.author.id);
     const purposeStr = purposeData ? `\n\nThe user's stated journal purpose/goal: "${purposeData.purpose}"\nKeep this goal in mind when analyzing their entries — reference their progress toward it when relevant.` : '';
     const entriesBlock = formatted ? `\n\nJournal entries:\n\n${formatted}` : '';
-    const context = `Context window: all time\nJournal summary: ${stats}${purposeStr}${entriesBlock}\n\n---\nUser's message: ${userText}`;
-    const reply = await llmChat(chatCmd.SYSTEM_PROMPT, context);
+
+    // Check for a cached chart image in this channel (from /chart command)
+    const cachedChart = chartCmd.getCachedChart(message.channelId);
+    let chartContext = '';
+    let chatOptions = {};
+    if (cachedChart) {
+      chartContext = `\n\n[A ${cachedChart.ticker} ${cachedChart.timeframe} candlestick chart is currently displayed in this channel. The chart image is attached for your reference. You can see and analyze the chart visually.]`;
+      chatOptions = { imageBase64: cachedChart.buffer.toString('base64') };
+    }
+
+    const context = `Context window: all time\nJournal summary: ${stats}${purposeStr}${chartContext}${entriesBlock}\n\n---\nUser's message: ${userText}`;
+    const reply = await llmChat(chatCmd.SYSTEM_PROMPT, context, chatOptions);
 
     if (reply.length <= 2000) {
       await message.reply(reply);

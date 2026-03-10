@@ -1,9 +1,25 @@
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || 'anthropic/claude-opus-4.6';
 
-async function chat(systemPrompt, userMessage) {
+async function chat(systemPrompt, userMessage, options = {}) {
   if (!OPENROUTER_API_KEY) {
     throw new Error('OPENROUTER_API_KEY is not set.');
+  }
+
+  // Build user content — text only or multimodal (text + image)
+  let userContent;
+  if (options.imageBase64) {
+    userContent = [
+      { type: 'text', text: userMessage },
+      { type: 'image_url', image_url: { url: `data:image/png;base64,${options.imageBase64}` } },
+    ];
+  } else if (options.imageUrl) {
+    userContent = [
+      { type: 'text', text: userMessage },
+      { type: 'image_url', image_url: { url: options.imageUrl } },
+    ];
+  } else {
+    userContent = userMessage;
   }
 
   const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
@@ -16,7 +32,7 @@ async function chat(systemPrompt, userMessage) {
       model: OPENROUTER_MODEL,
       messages: [
         { role: 'system', content: systemPrompt },
-        { role: 'user', content: userMessage },
+        { role: 'user', content: userContent },
       ],
       max_tokens: 1500,
     }),

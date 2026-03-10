@@ -1,4 +1,6 @@
-const { EmbedBuilder, AttachmentBuilder } = require('discord.js');
+const { EmbedBuilder, AttachmentBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { callModel } = require('../openrouter');
+const { getVisionModels } = require('../models');
 const sharp = require('sharp');
 
 // ─── Hyperliquid API ───
@@ -228,6 +230,89 @@ async function renderCandlestickChart(candles, coin, interval, label) {
   return { buffer, currentPrice, change, changeSymbol };
 }
 
+// ─── Chart data cache (for AI analysis button + ! chat ingestion) ───
+// Maps channelId → { buffer, ticker, timeframe, timestamp }
+const chartCache = new Map();
+const CHART_CACHE_TTL = 30 * 60 * 1000; // 30 minutes
+
+function cacheChart(channelId, buffer, ticker, timeframe) {
+  chartCache.set(channelId, { buffer, ticker, timeframe, timestamp: Date.now() });
+}
+
+function getCachedChart(channelId) {
+  const entry = chartCache.get(channelId);
+  if (!entry) return null;
+  if (Date.now() - entry.timestamp > CHART_CACHE_TTL) {
+    chartCache.delete(channelId);
+    return null;
+  }
+  return entry;
+}
+
+// ─── AI Analysis handler (called when button is clicked) ───
+
+const ANALYSIS_SYSTEM_PROMPT = `You are a technical analyst. The user has provided a candlestick chart. Analyze the chart thoroughly and provide:
+
+1. **Trend** — Overall trend direction (bullish, bearish, or sideways) and strength
+2. **Key Levels** — Notable support/resistance zones visible on the chart
+3. **Pattern Recognition** — Any chart patterns (head & shoulders, flags, wedges, double tops/bottoms, etc.)
+4. **Candlestick Signals** — Notable candlestick patterns (doji, engulfing, hammer, etc.) especially recent ones
+5. **Momentum** — Assessment of buying/selling pressure based on candle sizes and wicks
+6. **Verdict** — LONG or SHORT recommendation with confidence level (low/medium/high)
+
+Be concise but specific. Reference what you actually see in the chart. Use plain text formatting suitable for Discord.`;
+
+async function runChartAnalysis(interaction) {
+  const channelId = interaction.channelId;
+  const cached = getCachedChart(channelId);
+
+  if (!cached) {
+    await interaction.editReply({
+      content: 'Chart data expired. Please run `/chart` again.',
+      embeds: [],
+      components: [],
+    });
+    return;
+  }
+
+  const imageBase64 = cached.buffer.toString('base64');
+
+  // Pick a single strong vision model for the analysis
+  const visionModels = getVisionModels();
+  const preferredModel = visionModels.find(m => m.id.includes('claude-sonnet-4.6')) || visionModels[0];
+
+  const progressEmbed = new EmbedBuilder()
+    .setTitle(`AI Analysis — ${cached.ticker} · ${cached.timeframe}`)
+    .setColor(0x3b82f6)
+    .setDescription(`Analyzing chart with **${preferredModel.name}**...`);
+
+  await interaction.editReply({ embeds: [progressEmbed], components: [] });
+
+  try {
+    const userMsg = `Analyze this ${cached.ticker} candlestick chart on the ${cached.timeframe} timeframe. Give your full technical analysis.`;
+    const response = await callModel(preferredModel.id, ANALYSIS_SYSTEM_PROMPT, userMsg, {
+      imageBase64,
+      maxTokens: 1500,
+    });
+
+    const resultEmbed = new EmbedBuilder()
+      .setTitle(`AI Analysis — ${cached.ticker} · ${cached.timeframe}`)
+      .setColor(0x3b82f6)
+      .setDescription(response.slice(0, 4090))
+      .setFooter({ text: `Powered by ${preferredModel.name}` })
+      .setTimestamp();
+
+    await interaction.editReply({ embeds: [resultEmbed], components: [] });
+  } catch (err) {
+    console.error('[chart AI analysis] Error:', err.message);
+    const errorEmbed = new EmbedBuilder()
+      .setTitle('AI Analysis — Error')
+      .setColor(0xef4444)
+      .setDescription(`Analysis failed: ${err.message}\n\nPlease try again.`);
+    await interaction.editReply({ embeds: [errorEmbed], components: [] });
+  }
+}
+
 // ─── Module Export ───
 
 module.exports = {
@@ -268,7 +353,19 @@ module.exports = {
         .setFooter({ text: `${candles.length} candles \u00B7 ${tf.label} timeframe` })
         .setTimestamp();
 
-      await interaction.editReply({ embeds: [embed], files: [file] });
+      // Cache chart buffer for AI analysis button and ! chat vision
+      const channelId = interaction.channelId;
+      cacheChart(channelId, buffer, displayName, tf.label);
+
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId('chart_analyze')
+          .setLabel('AI Analysis')
+          .setStyle(ButtonStyle.Primary)
+          .setEmoji('🔍'),
+      );
+
+      await interaction.editReply({ embeds: [embed], files: [file], components: [row] });
     } catch (err) {
       console.error('[/chart] Error:', err.message);
 
@@ -282,4 +379,11 @@ module.exports = {
       await interaction.editReply({ embeds: [errorEmbed] });
     }
   },
+
+  async handleAnalysisButton(interaction) {
+    await interaction.deferReply();
+    await runChartAnalysis(interaction);
+  },
+
+  getCachedChart,
 };
