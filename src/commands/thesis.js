@@ -1,5 +1,6 @@
 const { EmbedBuilder } = require('discord.js');
 const { chat: llmChat } = require('../openrouter');
+const { saveThesis } = require('../thesisStore');
 
 // ─── B.O.B. Thesis Detection ───
 
@@ -120,6 +121,22 @@ module.exports = {
     const catalyst = parsed.catalyst || 'Not specified';
     const confidence = (parsed.confidence || 'MEDIUM').toUpperCase();
     const summary = parsed.summary || 'No summary extracted.';
+
+    // Persist distilled thesis to local store
+    try {
+      saveThesis(interaction.user.id, {
+        asset,
+        direction,
+        timeframe,
+        sizing,
+        catalyst,
+        confidence,
+        summary,
+        thesisDate,
+      });
+    } catch (err) {
+      console.error('[/thesis] Failed to save thesis to store:', err);
+    }
 
     const dirEmoji = direction === 'SHORT' ? '📉' : '📈';
     const confEmoji = confidence === 'HIGH' ? '🔴' : confidence === 'LOW' ? '🟢' : '🟡';
