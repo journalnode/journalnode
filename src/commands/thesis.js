@@ -186,10 +186,13 @@ async function executeSingle(interaction, channel) {
 
   let parsed;
   try {
-    const response = await llmChat(DISTILL_PROMPT, thesisText);
+    const response = await llmChat(DISTILL_PROMPT, thesisText, { maxTokens: 3000 });
     const jsonMatch = response.match(/\{[\s\S]*\}/);
     if (!jsonMatch) throw new Error('LLM did not return valid JSON');
-    parsed = JSON.parse(jsonMatch[0]);
+    let jsonStr = jsonMatch[0]
+      .replace(/,\s*([}\]])/g, '$1')
+      .replace(/[\x00-\x1F\x7F]/g, (c) => c === '\n' || c === '\r' || c === '\t' ? c : '');
+    parsed = JSON.parse(jsonStr);
   } catch (err) {
     console.error('[/thesis] Distillation failed:', err);
     const errorEmbed = new EmbedBuilder()
@@ -282,10 +285,14 @@ async function executeMultiDay(interaction, channel, startDate, endDate) {
 
   let parsed;
   try {
-    const response = await llmChat(AGGREGATE_PROMPT, combinedText);
+    const response = await llmChat(AGGREGATE_PROMPT, combinedText, { maxTokens: 4000 });
     const jsonMatch = response.match(/\{[\s\S]*\}/);
     if (!jsonMatch) throw new Error('LLM did not return valid JSON');
-    parsed = JSON.parse(jsonMatch[0]);
+    // Clean up common LLM JSON issues before parsing
+    let jsonStr = jsonMatch[0]
+      .replace(/,\s*([}\]])/g, '$1')   // remove trailing commas
+      .replace(/[\x00-\x1F\x7F]/g, (c) => c === '\n' || c === '\r' || c === '\t' ? c : ''); // strip control chars
+    parsed = JSON.parse(jsonStr);
   } catch (err) {
     console.error('[/thesis] Aggregate analysis failed:', err);
     const errorEmbed = new EmbedBuilder()

@@ -34,7 +34,7 @@ async function chat(systemPrompt, userMessage, options = {}) {
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userContent },
       ],
-      max_tokens: 1500,
+      max_tokens: options.maxTokens || 1500,
     }),
   });
 
