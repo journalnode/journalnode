@@ -1,71 +1,7 @@
 const { EmbedBuilder } = require('discord.js');
 const { chat: llmChat } = require('../openrouter');
 const { saveThesis } = require('../thesisStore');
-
-// ─── B.O.B. Thesis Detection ───
-
-const BOB_USERNAME = 'jollyadvisorbot';
-
-function getBobText(msg) {
-  if (msg.content && msg.content.length > 200) return msg.content;
-  if (msg.embeds?.length > 0) {
-    for (const embed of msg.embeds) {
-      const text = [embed.title, embed.description, ...(embed.fields || []).map(f => `${f.name}\n${f.value}`)].filter(Boolean).join('\n');
-      if (text.length > 200) return text;
-    }
-  }
-  return null;
-}
-
-async function findBobThesis(channel) {
-  const messages = await channel.messages.fetch({ limit: 100 });
-  const thesis = messages.find(msg => {
-    if (msg.author.username !== BOB_USERNAME) return false;
-    const text = getBobText(msg);
-    if (!text) return false;
-    return /thesis/i.test(text);
-  });
-  return thesis || null;
-}
-
-/**
- * Fetch all B.O.B. thesis messages within a date range.
- * Scans channel history in batches (up to 500 messages) and filters by date.
- */
-async function findBobThesesInRange(channel, startDate, endDate) {
-  const theses = [];
-  let lastId = null;
-  const maxBatches = 5; // 500 messages max scan
-
-  for (let i = 0; i < maxBatches; i++) {
-    const options = { limit: 100 };
-    if (lastId) options.before = lastId;
-
-    const messages = await channel.messages.fetch(options);
-    if (messages.size === 0) break;
-
-    for (const [, msg] of messages) {
-      // Stop scanning if we've gone past the start date
-      if (msg.createdAt < startDate) {
-        return theses;
-      }
-
-      if (msg.author.username !== BOB_USERNAME) continue;
-      if (msg.createdAt > endDate) continue;
-
-      const text = getBobText(msg);
-      if (!text) continue;
-      if (!/thesis/i.test(text)) continue;
-
-      theses.push({ message: msg, text });
-    }
-
-    lastId = messages.last()?.id;
-    if (!lastId) break;
-  }
-
-  return theses;
-}
+const { getBobText, findLatestBobThesis, findBobThesesInRange } = require('../bobDetect');
 
 // ─── Distillation Prompt (single thesis) ───
 
@@ -149,9 +85,9 @@ function formatDateShort(date) {
 // ─── Single Thesis Execution (existing behavior) ───
 
 async function executeSingle(interaction, channel) {
-  const thesisMsg = await findBobThesis(channel);
+  const result = await findLatestBobThesis(channel);
 
-  if (!thesisMsg) {
+  if (!result) {
     const embed = new EmbedBuilder()
       .setTitle('B.O.B. Thesis — Not Found')
       .setColor(0xef4444)
@@ -163,15 +99,8 @@ async function executeSingle(interaction, channel) {
     return;
   }
 
-  const thesisText = getBobText(thesisMsg);
-  if (!thesisText) {
-    const embed = new EmbedBuilder()
-      .setTitle('B.O.B. Thesis — Empty')
-      .setColor(0xef4444)
-      .setDescription('Found a B.O.B. message but could not extract thesis text.');
-    await interaction.editReply({ embeds: [embed] });
-    return;
-  }
+  const thesisMsg = result.message;
+  const thesisText = result.text;
 
   const parsingEmbed = new EmbedBuilder()
     .setTitle('B.O.B. Thesis — Distilling...')

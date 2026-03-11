@@ -1,6 +1,7 @@
 const { chat } = require('../openrouter');
 const { formatEntries, summarizeStats, sendLong, purposeContext } = require('./helpers');
 const { timeframeLabel } = require('../timeframe');
+const { findLatestBobThesis } = require('../bobDetect');
 
 // Static knowledge base — does not change between deployments
 const BASE_PROMPT = `You are Journal Node, a Discord bot built for the Post Fiat Network. You serve two roles:
@@ -9,9 +10,12 @@ const BASE_PROMPT = `You are Journal Node, a Discord bot built for the Post Fiat
 
 2. POST FIAT KNOWLEDGE BASE — You answer questions about yourself, the Post Fiat protocol, and the ecosystem. Be conversational, thorough, and accurate. Never invent features or commands that don't exist.
 
+3. B.O.B. THESIS ANALYST — When a B.O.B. daily thesis is present in the context, you can discuss, analyze, and critique it. Reference specific data points from the thesis (asset, direction, catalysts, timeframe, sizing, confidence). Compare the thesis to the user's journal entries or trading history when relevant. Offer your own perspective on the thesis logic, risk/reward, and market conditions. If the user asks about "the thesis", "B.O.B.", "BOB", or market views, check whether a B.O.B. thesis is available in the context and reference it.
+
 If the user asks about their journal or personal topics — ground your response in their entries.
 If the user asks about Post Fiat, features, or the ecosystem — answer from the knowledge base below.
-If they ask something that spans both, weave together personal insight with factual knowledge.
+If the user asks about a B.O.B. thesis or market analysis — reference the thesis data in context and provide substantive discussion.
+If they ask something that spans multiple areas, weave together personal insight, factual knowledge, and thesis analysis as appropriate.
 
 --- KNOWLEDGE BASE ---
 
@@ -67,7 +71,21 @@ module.exports = {
     const formatted = entries.length > 0 ? formatEntries(entries) : '';
     const purpose = purposeContext(interaction.user.id);
     const entriesBlock = formatted ? `\n\nJournal entries:\n\n${formatted}` : '';
-    const context = `Context window: ${tfLabel}\nJournal summary: ${stats}${purpose}${entriesBlock}\n\n---\nUser's message: ${userMessage}`;
+
+    // Scan for B.O.B. thesis in channel history
+    let thesisContext = '';
+    try {
+      const channel = interaction.channel ?? await interaction.client.channels.fetch(interaction.channelId);
+      const bobResult = await findLatestBobThesis(channel);
+      if (bobResult) {
+        const thesisDate = bobResult.message.createdAt.toLocaleDateString('en-US', { dateStyle: 'medium' });
+        thesisContext = `\n\n--- B.O.B. DAILY THESIS (${thesisDate}) ---\nThe following is the latest daily trading thesis from B.O.B. (jollyadvisorbot), an AI trading advisor bot in this channel. You can reference, analyze, and discuss this thesis when the user asks about it.\n\n${bobResult.text}`;
+      }
+    } catch (err) {
+      console.error('[/chat] Failed to fetch B.O.B. thesis:', err);
+    }
+
+    const context = `Context window: ${tfLabel}\nJournal summary: ${stats}${purpose}${thesisContext}${entriesBlock}\n\n---\nUser's message: ${userMessage}`;
     const reply = await chat(systemPrompt || SYSTEM_PROMPT, context);
     await interaction.editReply(reply.slice(0, 2000));
     if (reply.length > 2000) await sendLong(interaction, reply.slice(2000));

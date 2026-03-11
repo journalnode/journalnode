@@ -58,6 +58,7 @@ const { chat: llmChat } = require('./openrouter');
 const { formatEntries, summarizeStats, sendLong } = require('./commands/helpers');
 const { getUserPurpose } = require('./onboardStore');
 const { buildCapabilities } = require('./capabilities');
+const { findLatestBobThesis } = require('./bobDetect');
 
 // Build slash command definitions
 function addTimeframeOption(builder) {
@@ -667,7 +668,19 @@ client.on('messageCreate', async (message) => {
       chatOptions = { imageBase64: cachedChart.buffer.toString('base64') };
     }
 
-    const context = `Context window: all time\nJournal summary: ${stats}${purposeStr}${chartContext}${entriesBlock}\n\n---\nUser's message: ${userText}`;
+    // Scan for B.O.B. thesis in channel history
+    let thesisContext = '';
+    try {
+      const bobResult = await findLatestBobThesis(message.channel);
+      if (bobResult) {
+        const thesisDate = bobResult.message.createdAt.toLocaleDateString('en-US', { dateStyle: 'medium' });
+        thesisContext = `\n\n--- B.O.B. DAILY THESIS (${thesisDate}) ---\nThe following is the latest daily trading thesis from B.O.B. (jollyadvisorbot), an AI trading advisor bot in this channel. You can reference, analyze, and discuss this thesis when the user asks about it.\n\n${bobResult.text}`;
+      }
+    } catch (err) {
+      console.error('[!chat] Failed to fetch B.O.B. thesis:', err);
+    }
+
+    const context = `Context window: all time\nJournal summary: ${stats}${purposeStr}${chartContext}${thesisContext}${entriesBlock}\n\n---\nUser's message: ${userText}`;
     const reply = await llmChat(dynamicSystemPrompt, context, chatOptions);
 
     if (reply.length <= 2000) {
