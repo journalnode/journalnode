@@ -23,7 +23,14 @@ module.exports = {
 
     console.log(`[/gallery] Fetching NFTs for ${active.address}`);
 
-    const nfts = await getNFTs(active.address);
+    let nfts;
+    try {
+      nfts = await getNFTs(active.address);
+    } catch (err) {
+      console.error('[/gallery] Failed to fetch NFTs:', err);
+      await interaction.editReply('Failed to fetch your NFTs from the Post Fiat testnet. The network may be temporarily unavailable — please try again in a moment.');
+      return;
+    }
 
     if (nfts.length === 0) {
       await interaction.editReply('No NFTs found for your active wallet. Use `/mint` to create one.');

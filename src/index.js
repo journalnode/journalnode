@@ -630,7 +630,11 @@ client.on('interactionCreate', async (interaction) => {
     }
   } catch (err) {
     console.error(`Command /${interaction.commandName} failed:`, err);
-    const errorMsg = 'Something went wrong running that command. Check your OPENROUTER_API_KEY and try again.';
+    // Only mention OpenRouter for commands that actually use the LLM
+    const llmCommands = ['chat'];
+    const errorMsg = llmCommands.includes(interaction.commandName)
+      ? 'Something went wrong running that command. Check your OPENROUTER_API_KEY and try again.'
+      : `Something went wrong running /${interaction.commandName}. Please try again.`;
     if (interaction.deferred || interaction.replied) {
       await interaction.followUp(errorMsg).catch(() => {});
     } else {

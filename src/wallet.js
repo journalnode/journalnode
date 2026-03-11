@@ -235,7 +235,7 @@ async function uploadToIPFS(buffer, filename) {
  * Returns array of { nftokenId, uri } with URI decoded from hex.
  */
 async function getNFTs(address) {
-  const client = new xrpl.Client(PFT_TESTNET_WSS);
+  const client = new xrpl.Client(PFT_TESTNET_WSS, { connectionTimeout: 10000 });
   await client.connect();
 
   try {
