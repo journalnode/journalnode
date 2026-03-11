@@ -2,7 +2,8 @@ const { chat } = require('../openrouter');
 const { formatEntries, summarizeStats, sendLong, purposeContext } = require('./helpers');
 const { timeframeLabel } = require('../timeframe');
 
-const SYSTEM_PROMPT = `You are Journal Node, a Discord bot built for the Post Fiat Network. You serve two roles:
+// Static knowledge base — does not change between deployments
+const BASE_PROMPT = `You are Journal Node, a Discord bot built for the Post Fiat Network. You serve two roles:
 
 1. JOURNAL COMPANION — You've read the user's journal entries and provide insights, advice, and pattern recognition grounded in what they've actually written. Reference specific entries when relevant. Be direct and honest — like a trusted friend, not a therapist.
 
@@ -33,43 +34,31 @@ Dual-Cylinder Growth: Retail flywheel (users → better AI → higher returns �
 
 Cultural Doctrine: AI-first decisions, mission-driven around solving money, anti-extractive, positive-sum financial design. Rewards contributors over speculators. Building a system where humans are economically useful in the age of AGI.
 
-Long-Term Vision: In the post-AGI world, humans rewarded for useful contribution, AI distributes capital programmatically, currency becomes a coordination primitive. Post Fiat is designed to be that primitive.
+Long-Term Vision: In the post-AGI world, humans rewarded for useful contribution, AI distributes capital programmatically, currency becomes a coordination primitive. Post Fiat is designed to be that primitive.`;
 
----
+/**
+ * Build the full system prompt by combining the static knowledge base
+ * with a dynamic capabilities block that reflects the live command registry.
+ *
+ * @param {string} [capabilitiesBlock] – output of buildCapabilities()
+ * @returns {string} complete system prompt
+ */
+function buildSystemPrompt(capabilitiesBlock) {
+  const dynamicSection = capabilitiesBlock
+    ? `\n\n--- YOUR FEATURES (LIVE COMMAND REGISTRY) ---\n\n${capabilitiesBlock}`
+    : '';
+  return `${BASE_PROMPT}${dynamicSection}\n\nUse plain text formatting suitable for Discord.`;
+}
 
-YOUR FEATURES (JOURNAL NODE):
-
-Two suites: Economic and Post Fiat.
-
-ECONOMIC SUITE (Flagship Products):
-• /trade — Immutable trade tickets: asset, direction (long/short), entry, target, timeframe, emotion/reasoning, chart screenshot. Unique ticket with "Run LLM Analysis" button. Close via /mytrades, record outcome and post-mortem. Mint closed tickets as NFTs for on-chain track record.
-• /mytrades — View/close open trades. Record win/loss, exit price, post-mortem reflections.
-• /llmanalyze — AI market analysis, 4 modes (1 PFT each, paid to Journal Node master wallet):
-  - Bullish or Bearish: All 18 LLMs vote on asset thesis → pie chart consensus
-  - Multi-Valuation: Up to 8 LLMs estimate market cap at target date → bar chart + average
-  - Solo-Valuation: 1 model × 1-5 runs → distribution with mean/median
-  - Technical Analyst: Up to 8 vision LLMs analyze chart screenshot → Long/Short consensus
-
-LLM-Optimization Thesis: Asset prices will converge toward "LLM Consensus" as AI agents increasingly manage retail sentiment and institutional capital. /llmanalyze shows where consensus sits today.
-
-Key Benefits: 1) More trades logged → deeper AI insights on strategies, P&L, strengths, weaknesses. 2) Personal views + /llmanalyze = synergistic human+AI feedback loop for improved decision-making over time.
-
-POST FIAT SUITE (Network Tools):
-• /postfiat — Create wallet, set goals, receive PFT airdrop
-• /wallets — Create, import (seed/key), delete, set-active
-• /balance — Check PFT balance | /send — Send PFT with memo | /receive — Show address
-• /mint — Mint NFTs on Post Fiat testnet | /gallery — View NFT collection
-• /onboard — Set purpose + earn PFT
-
-GENERAL: /chat or ! prefix — Talk to me | /menu — All commands | /faq — FAQ
-
-Use plain text formatting suitable for Discord.`;
+// Fallback: static SYSTEM_PROMPT for callers that haven't injected capabilities yet
+const SYSTEM_PROMPT = buildSystemPrompt();
 
 module.exports = {
   SYSTEM_PROMPT,
+  buildSystemPrompt,
   name: 'chat',
   description: 'Talk to your journal — ask questions, get advice, explore ideas.',
-  async execute(interaction, entries) {
+  async execute(interaction, entries, { systemPrompt } = {}) {
     const userMessage = interaction.options.getString('message');
     const timeframe = interaction.options.getString('timeframe');
     const tfLabel = timeframeLabel(timeframe);
@@ -79,7 +68,7 @@ module.exports = {
     const purpose = purposeContext(interaction.user.id);
     const entriesBlock = formatted ? `\n\nJournal entries:\n\n${formatted}` : '';
     const context = `Context window: ${tfLabel}\nJournal summary: ${stats}${purpose}${entriesBlock}\n\n---\nUser's message: ${userMessage}`;
-    const reply = await chat(SYSTEM_PROMPT, context);
+    const reply = await chat(systemPrompt || SYSTEM_PROMPT, context);
     await interaction.editReply(reply.slice(0, 2000));
     if (reply.length > 2000) await sendLong(interaction, reply.slice(2000));
   },

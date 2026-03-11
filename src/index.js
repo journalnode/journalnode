@@ -57,6 +57,7 @@ commands.set(watchlistCmd.name, watchlistCmd);
 const { chat: llmChat } = require('./openrouter');
 const { formatEntries, summarizeStats, sendLong } = require('./commands/helpers');
 const { getUserPurpose } = require('./onboardStore');
+const { buildCapabilities } = require('./capabilities');
 
 // Build slash command definitions
 function addTimeframeOption(builder) {
@@ -333,6 +334,10 @@ const watchlistBuilder = new SlashCommandBuilder()
     .setName('view')
     .setDescription('View your watchlist with live prices.'));
 slashCommands.push(watchlistBuilder.toJSON());
+
+// --- Dynamic self-awareness: build a live system prompt from the command registry ---
+const capabilitiesBlock = buildCapabilities(slashCommands);
+const dynamicSystemPrompt = chatCmd.buildSystemPrompt(capabilitiesBlock);
 
 const client = new Client({
   intents: [
@@ -616,7 +621,12 @@ client.on('interactionCreate', async (interaction) => {
     const allEntries = await fetchJournalEntries(channel, client.user.id);
     const entries = filterByTimeframe(allEntries, timeframe);
 
-    await cmd.execute(interaction, entries);
+    // Inject the dynamic system prompt for /chat so it knows about all commands
+    if (cmd.name === 'chat') {
+      await cmd.execute(interaction, entries, { systemPrompt: dynamicSystemPrompt });
+    } else {
+      await cmd.execute(interaction, entries);
+    }
   } catch (err) {
     console.error(`Command /${interaction.commandName} failed:`, err);
     const errorMsg = 'Something went wrong running that command. Check your OPENROUTER_API_KEY and try again.';
@@ -658,7 +668,7 @@ client.on('messageCreate', async (message) => {
     }
 
     const context = `Context window: all time\nJournal summary: ${stats}${purposeStr}${chartContext}${entriesBlock}\n\n---\nUser's message: ${userText}`;
-    const reply = await llmChat(chatCmd.SYSTEM_PROMPT, context, chatOptions);
+    const reply = await llmChat(dynamicSystemPrompt, context, chatOptions);
 
     if (reply.length <= 2000) {
       await message.reply(reply);
