@@ -167,7 +167,7 @@ const galleryBuilder = new SlashCommandBuilder()
   .setDescription(galleryCmd.description)
   .addIntegerOption(opt => opt
     .setName('page')
-    .setDescription('Page number (10 NFTs per page)')
+    .setDescription('Page number (5 NFTs per page)')
     .setRequired(false));
 slashCommands.push(galleryBuilder.toJSON());
 

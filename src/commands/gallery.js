@@ -4,7 +4,8 @@ const { getActiveWallet, getUserWallets } = require('../walletStore');
 const IPFS_GATEWAY = 'https://ipfs.io/ipfs/';
 const EXPLORER = 'https://explorer.testnet.postfiat.org';
 const JOLLYDINGER = 'https://jollydinger.com/nft-detail.html?id=';
-const PAGE_SIZE = 10;
+const PAGE_SIZE = 5;
+const DISCORD_MAX = 2000;
 
 module.exports = {
   name: 'gallery',
@@ -67,6 +68,25 @@ module.exports = {
       lines.push(`Use \`/gallery page:${currentPage + 2}\` to see more.`);
     }
 
-    await interaction.editReply(lines.join('\n'));
+    const full = lines.join('\n');
+    if (full.length <= DISCORD_MAX) {
+      await interaction.editReply(full);
+    } else {
+      // Split into chunks that fit Discord's limit
+      const chunks = [];
+      let remaining = full;
+      while (remaining.length > DISCORD_MAX) {
+        let cut = remaining.lastIndexOf('\n', DISCORD_MAX);
+        if (cut <= 0) cut = DISCORD_MAX;
+        chunks.push(remaining.slice(0, cut));
+        remaining = remaining.slice(cut).replace(/^\n/, '');
+      }
+      if (remaining.length > 0) chunks.push(remaining);
+
+      await interaction.editReply(chunks[0]);
+      for (let i = 1; i < chunks.length; i++) {
+        await interaction.followUp({ content: chunks[i], flags: 64 });
+      }
+    }
   },
 };
