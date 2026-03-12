@@ -43,4 +43,9 @@ function getAnalysesByTradeId(userId, tradeId) {
   return all.filter(a => a.tradeId === tradeId);
 }
 
-module.exports = { saveAnalysis, getAnalysesByTradeId };
+function getUserAnalyses(userId) {
+  const store = loadStore();
+  return store[userId] || [];
+}
+
+module.exports = { saveAnalysis, getAnalysesByTradeId, getUserAnalyses };

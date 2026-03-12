@@ -53,6 +53,8 @@ const compareCmd = require('./commands/compare');
 commands.set(compareCmd.name, compareCmd);
 const watchlistCmd = require('./commands/watchlist');
 commands.set(watchlistCmd.name, watchlistCmd);
+const statsCmd = require('./commands/stats');
+commands.set(statsCmd.name, statsCmd);
 
 const { chat: llmChat } = require('./openrouter');
 const { formatEntries, summarizeStats, sendLong } = require('./commands/helpers');
@@ -336,6 +338,12 @@ const watchlistBuilder = new SlashCommandBuilder()
     .setDescription('View your watchlist with live prices.'));
 slashCommands.push(watchlistBuilder.toJSON());
 
+// /stats: no options needed
+const statsBuilder = new SlashCommandBuilder()
+  .setName('stats')
+  .setDescription(statsCmd.description);
+slashCommands.push(statsBuilder.toJSON());
+
 // --- Dynamic self-awareness: build a live system prompt from the command registry ---
 const capabilitiesBlock = buildCapabilities(slashCommands);
 const dynamicSystemPrompt = chatCmd.buildSystemPrompt(capabilitiesBlock);
@@ -357,7 +365,7 @@ client.once('clientReady', async () => {
   try {
     console.log('Registering slash commands...');
     await rest.put(Routes.applicationCommands(client.user.id), { body: slashCommands });
-    const allNames = ['chat', 'postfiat', 'wallets', 'send', 'balance', 'mint', 'gallery', 'receive', 'onboard', 'trade', 'mytrades', 'menu', 'llmanalyze', 'faq', 'tradehistory', 'chart', 'sendnft', 'thesis', 'compare', 'watchlist'].map(c => `/${c}`).join(', ');
+    const allNames = ['chat', 'postfiat', 'wallets', 'send', 'balance', 'mint', 'gallery', 'receive', 'onboard', 'trade', 'mytrades', 'menu', 'llmanalyze', 'faq', 'tradehistory', 'chart', 'sendnft', 'thesis', 'compare', 'watchlist', 'stats'].map(c => `/${c}`).join(', ');
     console.log(`Registered ${slashCommands.length} slash commands: ${allNames}`);
   } catch (err) {
     console.error('Failed to register slash commands:', err);

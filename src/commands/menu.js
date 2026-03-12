@@ -15,6 +15,7 @@ module.exports = {
       '`/compare` — Side-by-side LLM analysis comparing two assets.',
       '`/chart` — Display a candlestick chart (crypto or stocks) from Hyperliquid.',
       '`/watchlist` — Track assets with live prices and quick chart access.',
+      '`/stats` — Personal trading dashboard with win rate, P&L, and model accuracy.',
       '',
       '**━━━ Post Fiat Suite ━━━**',
       '`/postfiat` — Opt in to Post Fiat testnet.',
