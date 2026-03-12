@@ -1,5 +1,14 @@
-const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder } = require('discord.js');
+const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, AttachmentBuilder } = require('discord.js');
 const { addAsset, removeAsset, getWatchlist } = require('../watchlistStore');
+const { chat: llmChat } = require('../openrouter');
+const { sendPFT, getBalance } = require('../wallet');
+const { getActiveWallet, getWalletSeed } = require('../walletStore');
+
+// ─── PFT Micro-Payment Constants ───
+
+const JOURNAL_NODE_WALLET = 'rLnrtLSQdtmWgTiY3o6NNWKpb43RsvZ1yW';
+const LLM_FEE_PFT = '1';
+const PFT_EXPLORER = 'https://explorer.testnet.postfiat.org/transactions';
 
 // ─── Hyperliquid price fetching (reuses same API as /chart) ───
 
@@ -210,16 +219,256 @@ async function handleView(interaction) {
         .setPlaceholder('View chart for an asset...')
         .addOptions(assetOptions);
       components.push(new ActionRowBuilder().addComponents(assetSelect));
+
+      // Analyze select menu (AI analysis with 1 PFT fee)
+      const analyzeOptions = assetOptions.map(opt => ({
+        label: `Analyze ${opt.label}`,
+        value: opt.value,
+        description: `AI price analysis (1 PFT fee)`,
+      }));
+      const analyzeSelect = new StringSelectMenuBuilder()
+        .setCustomId('wl_analyze_asset')
+        .setPlaceholder('AI Analyze an asset (1 PFT)...')
+        .addOptions(analyzeOptions);
+      components.push(new ActionRowBuilder().addComponents(analyzeSelect));
     }
   }
 
   await interaction.editReply({ embeds: [embed], components });
 }
 
+// ─── AI Analysis helpers ───
+
+async function fetchPriceContext(coin) {
+  // Fetch 1d candles (last 30 days) and 1h candles (last 24h) for analysis context
+  const now = Date.now();
+
+  async function fetchCandles(interval, count) {
+    const intervalMs = INTERVAL_MS[interval] || 60 * 60 * 1000;
+    const startTime = now - (intervalMs * count);
+    const data = await fetchCandlesRaw(coin.toUpperCase(), interval, startTime, now);
+    if (data) return { candles: data, resolvedCoin: coin.toUpperCase() };
+    for (const prefix of HIP3_PREFIXES) {
+      const symbol = `${prefix}:${coin.toUpperCase()}`;
+      const tradfiData = await fetchCandlesRaw(symbol, interval, startTime, now);
+      if (tradfiData) return { candles: tradfiData, resolvedCoin: symbol };
+    }
+    return null;
+  }
+
+  const [daily, hourly] = await Promise.all([
+    fetchCandles('1d', 30),
+    fetchCandles('1h', 24),
+  ]);
+
+  if (!daily && !hourly) return null;
+
+  const resolvedCoin = (daily || hourly).resolvedCoin;
+  const displayName = resolvedCoin.includes(':') ? resolvedCoin.split(':')[1] : resolvedCoin;
+
+  let context = `Asset: ${displayName}\n`;
+
+  if (hourly) {
+    const last = hourly.candles[hourly.candles.length - 1];
+    const first = hourly.candles[0];
+    const currentPrice = parseFloat(last.c);
+    const openPrice24h = parseFloat(first.o);
+    const change24h = ((currentPrice - openPrice24h) / openPrice24h * 100).toFixed(2);
+    const high24h = Math.max(...hourly.candles.map(c => parseFloat(c.h)));
+    const low24h = Math.min(...hourly.candles.map(c => parseFloat(c.l)));
+
+    context += `Current Price: $${formatPrice(currentPrice)}\n`;
+    context += `24h Change: ${change24h}%\n`;
+    context += `24h High: $${formatPrice(high24h)}\n`;
+    context += `24h Low: $${formatPrice(low24h)}\n`;
+    context += `\nHourly candles (last 24h):\n`;
+    context += hourly.candles.map(c => {
+      const d = new Date(c.t);
+      return `${d.toISOString().slice(0, 16)} O:${parseFloat(c.o).toFixed(4)} H:${parseFloat(c.h).toFixed(4)} L:${parseFloat(c.l).toFixed(4)} C:${parseFloat(c.c).toFixed(4)} V:${parseFloat(c.v).toFixed(2)}`;
+    }).join('\n');
+  }
+
+  if (daily) {
+    const last = daily.candles[daily.candles.length - 1];
+    const first = daily.candles[0];
+    const change30d = ((parseFloat(last.c) - parseFloat(first.o)) / parseFloat(first.o) * 100).toFixed(2);
+    context += `\n\n30d Change: ${change30d}%\n`;
+    context += `\nDaily candles (last 30 days):\n`;
+    context += daily.candles.map(c => {
+      const d = new Date(c.t);
+      return `${d.toISOString().slice(0, 10)} O:${parseFloat(c.o).toFixed(4)} H:${parseFloat(c.h).toFixed(4)} L:${parseFloat(c.l).toFixed(4)} C:${parseFloat(c.c).toFixed(4)} V:${parseFloat(c.v).toFixed(2)}`;
+    }).join('\n');
+  }
+
+  return { context, displayName, resolvedCoin };
+}
+
+const WL_ANALYSIS_PROMPT = `You are a professional market analyst. Analyze the following asset's price action data and provide a concise, actionable briefing.
+
+Cover the following:
+1. **Current Trend** — Is the asset trending up, down, or ranging? Over what timeframe?
+2. **Key Levels** — Identify notable support and resistance levels from the price data.
+3. **Momentum** — Is momentum accelerating or decelerating? Any divergences?
+4. **Volume Profile** — Any notable volume patterns or anomalies?
+5. **Near-Term Outlook** — What is the most likely price action in the next 24-48 hours?
+6. **Risk Factors** — Key risks or levels to watch that would invalidate the outlook.
+
+Be direct, data-driven, and specific. Reference actual prices and percentages from the data. Keep it under 400 words. Use plain text formatting suitable for Discord.`;
+
+async function handleAnalyzeAsset(interaction) {
+  const ticker = interaction.values[0];
+  const userId = interaction.user.id;
+
+  // Defer ephemerally — we'll show payment flow
+  await interaction.deferReply({ flags: 64 });
+
+  // --- Payment flow ---
+  const active = getActiveWallet(userId);
+  if (!active) {
+    const embed = new EmbedBuilder()
+      .setTitle('Wallet Required')
+      .setColor(0xef4444)
+      .setDescription(
+        'You need an active wallet to use AI analysis.\n' +
+        'Use `/postfiat` to create one, or `/wallets import` to import an existing wallet.'
+      );
+    await interaction.editReply({ embeds: [embed] });
+    return;
+  }
+
+  const balance = await getBalance(active.address);
+  if (balance === null || parseFloat(balance) < parseFloat(LLM_FEE_PFT)) {
+    const embed = new EmbedBuilder()
+      .setTitle('Insufficient Balance')
+      .setColor(0xef4444)
+      .setDescription(
+        `You need at least **${LLM_FEE_PFT} PFT** to run AI analysis.\n\n` +
+        `**Your balance:** ${balance ?? '0 (not activated)'} PFT\n` +
+        `**Wallet:** \`${active.address}\``
+      );
+    await interaction.editReply({ embeds: [embed] });
+    return;
+  }
+
+  const memo = `Journal Node - Watchlist Analysis (${ticker})`;
+
+  const confirmEmbed = new EmbedBuilder()
+    .setTitle('Watchlist AI Analysis — Payment Required')
+    .setColor(0xf59e0b)
+    .setDescription(
+      `**Asset:** ${ticker}\n` +
+      `**Fee:** ${LLM_FEE_PFT} PFT\n` +
+      `**From:** \`${active.address}\`\n` +
+      `**To:** \`${JOURNAL_NODE_WALLET}\`\n` +
+      `**Your Balance:** ${balance} PFT\n\n` +
+      'Click **Confirm & Pay** to proceed with the AI analysis.'
+    );
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('wl_pay_confirm').setLabel(`Confirm & Pay ${LLM_FEE_PFT} PFT`).setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId('wl_pay_cancel').setLabel('Cancel').setStyle(ButtonStyle.Secondary),
+  );
+
+  await interaction.editReply({ embeds: [confirmEmbed], components: [row] });
+
+  let btnInteraction;
+  try {
+    const msg = await interaction.fetchReply();
+    btnInteraction = await msg.awaitMessageComponent({
+      filter: (i) => i.user.id === userId && (i.customId === 'wl_pay_confirm' || i.customId === 'wl_pay_cancel'),
+      time: 60000,
+    });
+  } catch {
+    const timeoutEmbed = new EmbedBuilder()
+      .setTitle('Payment Timed Out')
+      .setColor(0xef4444)
+      .setDescription('Payment confirmation timed out. Use `/watchlist view` to try again.');
+    await interaction.editReply({ embeds: [timeoutEmbed], components: [] });
+    return;
+  }
+
+  if (btnInteraction.customId === 'wl_pay_cancel') {
+    await btnInteraction.update({
+      embeds: [new EmbedBuilder().setTitle('Analysis Cancelled').setColor(0x6b7280).setDescription('Payment was cancelled.')],
+      components: [],
+    });
+    return;
+  }
+
+  await btnInteraction.update({
+    embeds: [new EmbedBuilder().setTitle('Processing Payment...').setColor(0xf59e0b).setDescription(`Sending ${LLM_FEE_PFT} PFT to Journal Node wallet...`)],
+    components: [],
+  });
+
+  // Execute payment
+  let txHash;
+  try {
+    const seed = getWalletSeed(userId, active.address);
+    if (!seed) {
+      await interaction.editReply({
+        embeds: [new EmbedBuilder().setTitle('Wallet Error').setColor(0xef4444).setDescription('Could not retrieve your wallet credentials. Try `/wallets set-active` to reset.')],
+      });
+      return;
+    }
+
+    const result = await sendPFT(seed, JOURNAL_NODE_WALLET, LLM_FEE_PFT, memo);
+    txHash = result.txHash;
+    const txUrl = `${PFT_EXPLORER}/${result.txHash}`;
+
+    const confirmedEmbed = new EmbedBuilder()
+      .setTitle('Payment Confirmed')
+      .setColor(0x22c55e)
+      .setDescription(
+        `**Amount:** ${LLM_FEE_PFT} PFT\n` +
+        `**Transaction:** [View on Explorer](${txUrl})\n\n` +
+        `Analyzing **${ticker}** price action...`
+      );
+    await interaction.editReply({ embeds: [confirmedEmbed], components: [] });
+  } catch (err) {
+    console.error(`[watchlist analyze] Payment failed:`, err.message);
+    await interaction.editReply({
+      embeds: [new EmbedBuilder().setTitle('Payment Failed').setColor(0xef4444).setDescription(`Transaction failed: ${err.message}\n\nPlease try again.`)],
+      components: [],
+    });
+    return;
+  }
+
+  // --- Fetch price data and run LLM analysis ---
+  try {
+    const priceData = await fetchPriceContext(ticker);
+    if (!priceData) {
+      await interaction.followUp({
+        embeds: [new EmbedBuilder().setTitle('Data Error').setColor(0xef4444).setDescription(`Could not fetch price data for **${ticker}**. Payment was processed — please try again.`)],
+        flags: 64,
+      });
+      return;
+    }
+
+    const analysis = await llmChat(WL_ANALYSIS_PROMPT, priceData.context, { maxTokens: 1500 });
+
+    const resultEmbed = new EmbedBuilder()
+      .setTitle(`AI Analysis — ${priceData.displayName}`)
+      .setColor(0x6366f1)
+      .setDescription(analysis.slice(0, 4096))
+      .setFooter({ text: `Powered by LLM · 1 PFT fee charged · TX: ${txHash.slice(0, 12)}...` })
+      .setTimestamp();
+
+    await interaction.followUp({ embeds: [resultEmbed], flags: 64 });
+  } catch (err) {
+    console.error(`[watchlist analyze] LLM analysis failed:`, err.message);
+    await interaction.followUp({
+      embeds: [new EmbedBuilder().setTitle('Analysis Error').setColor(0xef4444).setDescription(`AI analysis failed: ${err.message}\n\nPayment was processed successfully.`)],
+      flags: 64,
+    });
+  }
+}
+
 // ─── Button / Select Menu handlers ───
 
 async function handleSelectMenu(interaction) {
-  if (interaction.customId === 'wl_chart_asset') {
+  if (interaction.customId === 'wl_analyze_asset') {
+    return handleAnalyzeAsset(interaction);
+  } else if (interaction.customId === 'wl_chart_asset') {
     const ticker = interaction.values[0];
 
     // Show timeframe select
@@ -468,4 +717,7 @@ module.exports = {
   },
 
   handleSelectMenu,
+  fetchLatestPrice,
+  fetchPriceContext,
+  formatPrice,
 };

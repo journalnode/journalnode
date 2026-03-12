@@ -61,6 +61,7 @@ const { formatEntries, summarizeStats, sendLong } = require('./commands/helpers'
 const { getUserPurpose } = require('./onboardStore');
 const { buildCapabilities } = require('./capabilities');
 const { findLatestBobThesis } = require('./bobDetect');
+const { getWatchlist } = require('./watchlistStore');
 
 // Build slash command definitions
 function addTimeframeOption(builder) {
@@ -579,7 +580,7 @@ client.on('interactionCreate', async (interaction) => {
           await interaction.reply({ content: errorMsg, flags: 64 }).catch(() => {});
         }
       }
-    } else if (interaction.customId === 'wl_chart_asset' || interaction.customId.startsWith('wl_chart_tf_')) {
+    } else if (interaction.customId === 'wl_analyze_asset' || interaction.customId === 'wl_chart_asset' || interaction.customId.startsWith('wl_chart_tf_')) {
       try {
         await watchlistCmd.handleSelectMenu(interaction);
       } catch (err) {
@@ -692,7 +693,67 @@ client.on('messageCreate', async (message) => {
       console.error('[!chat] Failed to fetch B.O.B. thesis:', err);
     }
 
-    const context = `Context window: all time\nJournal summary: ${stats}${purposeStr}${chartContext}${thesisContext}${entriesBlock}\n\n---\nUser's message: ${userText}`;
+    // Fetch watchlist with live prices for context
+    let watchlistContext = '';
+    try {
+      const userWatchlist = getWatchlist(message.author.id);
+      if (userWatchlist.length > 0) {
+        const { fetchLatestPrice, formatPrice } = require('./commands/watchlist');
+        const priceResults = await Promise.all(
+          userWatchlist.map(async (asset) => {
+            const data = await fetchLatestPrice(asset.ticker);
+            return {
+              ticker: asset.ticker,
+              price: data ? data.price : null,
+              resolvedCoin: data ? data.resolvedCoin : asset.ticker,
+              isTradfi: data ? data.isTradfi : false,
+            };
+          })
+        );
+        const wlLines = priceResults.map(item => {
+          const displayName = item.resolvedCoin.includes(':')
+            ? item.resolvedCoin.split(':')[1]
+            : item.resolvedCoin;
+          const tag = item.isTradfi ? ' (Stock)' : '';
+          const priceStr = item.price !== null
+            ? `$${formatPrice(item.price)}`
+            : 'Price unavailable';
+          return `${displayName}${tag}: ${priceStr}`;
+        });
+
+        // If user mentions a watchlisted asset, fetch detailed price context
+        const upperText = userText.toUpperCase();
+        let detailedAsset = null;
+        for (const item of priceResults) {
+          const displayName = item.resolvedCoin.includes(':')
+            ? item.resolvedCoin.split(':')[1]
+            : item.resolvedCoin;
+          if (upperText.includes(displayName) || upperText.includes(item.ticker)) {
+            detailedAsset = item;
+            break;
+          }
+        }
+
+        let detailedContext = '';
+        if (detailedAsset) {
+          try {
+            const { fetchPriceContext } = require('./commands/watchlist');
+            const detailed = await fetchPriceContext(detailedAsset.ticker);
+            if (detailed) {
+              detailedContext = `\n\nDetailed price data for ${detailed.displayName}:\n${detailed.context}`;
+            }
+          } catch (err) {
+            console.error('[!chat] Failed to fetch detailed price data:', err);
+          }
+        }
+
+        watchlistContext = `\n\n--- USER'S WATCHLIST (LIVE PRICES) ---\nThe user is actively tracking these assets. When they ask about any of these assets, provide price analysis and briefings using the live data below.\n\n${wlLines.join('\n')}${detailedContext}`;
+      }
+    } catch (err) {
+      console.error('[!chat] Failed to fetch watchlist data:', err);
+    }
+
+    const context = `Context window: all time\nJournal summary: ${stats}${purposeStr}${chartContext}${thesisContext}${watchlistContext}${entriesBlock}\n\n---\nUser's message: ${userText}`;
     const reply = await llmChat(dynamicSystemPrompt, context, chatOptions);
 
     if (reply.length <= 2000) {
