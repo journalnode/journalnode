@@ -283,7 +283,11 @@ const chartBuilder = new SlashCommandBuilder()
         { name: '3 Day', value: '3d' },
         { name: 'Weekly', value: '1w' },
         { name: 'Monthly', value: '1M' },
-      ));
+      ))
+  .addStringOption(opt =>
+    opt.setName('marker')
+      .setDescription('Pin a date (MM/DD/YYYY) or tweet URL to show % change since that point')
+      .setRequired(false));
 slashCommands.push(chartBuilder.toJSON());
 
 // /sendnft: destination (required)
@@ -654,9 +658,14 @@ client.on('interactionCreate', async (interaction) => {
 
 // ─── fc command: "fc [ticker] [timeframe]" or "fc [ticker] [timeframe]%" chat shortcut for /chart ───
 // Trailing % enables swing-percentage overlay (e.g. "fc BTC 4h%", "fc ETH 1d %")
-const FC_REGEX = /^fc\s+(\S+)(?:\s+(\S+?))?\s*(%?)\s*$/i;
+// Optional trailing marker: a date (MM/DD/YYYY) or tweet URL
+// Examples:
+//   fc BTC 4h 03/01/2026
+//   fc BTC 4h% https://x.com/user/status/123
+//   fc ETH 1d % 02/15/2026
+const FC_REGEX = /^fc\s+(\S+)(?:\s+(\S+?))?\s*(%?)\s*((?:\d{1,2}\/\d{1,2}\/\d{4})|(?:https?:\/\/(?:x|twitter)\.com\/\S+))?\s*$/i;
 // Also match when % is glued to the timeframe like "fc BTC 4h%"
-const FC_REGEX_PCT_GLUED = /^fc\s+(\S+)\s+(\S+)%\s*$/i;
+const FC_REGEX_PCT_GLUED = /^fc\s+(\S+)\s+(\S+)%\s*((?:\d{1,2}\/\d{1,2}\/\d{4})|(?:https?:\/\/(?:x|twitter)\.com\/\S+))?\s*$/i;
 
 client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
@@ -664,13 +673,16 @@ client.on('messageCreate', async (message) => {
   // Try the glued-% regex first (e.g. "fc BTC 4h%"), then the standard regex
   let match = message.content.match(FC_REGEX_PCT_GLUED);
   let showSwings = false;
+  let markerInput = null;
 
   if (match) {
     showSwings = true;
+    markerInput = match[3] || null;
   } else {
     match = message.content.match(FC_REGEX);
     if (!match) return;
     showSwings = match[3] === '%';
+    markerInput = match[4] || null;
   }
 
   const ticker = match[1];
@@ -680,17 +692,17 @@ client.on('messageCreate', async (message) => {
   const validTimeframes = Object.keys(chartCmd.TIMEFRAMES);
   if (!chartCmd.TIMEFRAMES[timeframe]) {
     await message.reply(
-      `Invalid timeframe \`${timeframe}\`.\nSupported: ${validTimeframes.map(t => `\`${t}\``).join(', ')}\n\nUsage: \`fc <ticker> <timeframe>\` — e.g. \`fc BTC 4h\`\nAdd \`%\` for swing analysis: \`fc BTC 4h%\``
+      `Invalid timeframe \`${timeframe}\`.\nSupported: ${validTimeframes.map(t => `\`${t}\``).join(', ')}\n\nUsage: \`fc <ticker> <timeframe>\` — e.g. \`fc BTC 4h\`\nAdd \`%\` for swing analysis: \`fc BTC 4h%\`\nAdd a date or tweet link as marker: \`fc BTC 4h 03/01/2026\``
     );
     return;
   }
 
-  console.log(`[fc] ${message.author.username}: fc ${ticker} ${timeframe}${showSwings ? ' (swing %)' : ''}`);
+  console.log(`[fc] ${message.author.username}: fc ${ticker} ${timeframe}${showSwings ? ' (swing %)' : ''}${markerInput ? ` (marker: ${markerInput})` : ''}`);
 
   try {
     await message.channel.sendTyping();
 
-    const { embed, file, row, buffer, displayName, tf } = await chartCmd.generateChart(ticker, timeframe, { showSwings });
+    const { embed, file, row, buffer, displayName, tf } = await chartCmd.generateChart(ticker, timeframe, { showSwings, markerInput });
 
     // Cache chart for AI analysis button and ! chat vision
     chartCmd.cacheChart(message.channelId, buffer, displayName, tf.label);

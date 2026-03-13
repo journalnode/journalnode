@@ -45,6 +45,86 @@ const INTERVAL_MS = {
 // xyz = TradeXYZ (stocks), km = Kinetiq (indices), hyna = HyENA, vntl = Ventuals (pre-IPO)
 const HIP3_PREFIXES = ['xyz', 'km', 'hyna', 'vntl'];
 
+// ─── Marker Parsing ───
+
+const DATE_REGEX = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/;
+const TWEET_REGEX = /^https?:\/\/(?:x|twitter)\.com\/([^/]+)\/status\/(\d+)/i;
+
+/**
+ * Extract a timestamp from a Twitter Snowflake ID.
+ * Twitter Snowflake epoch: 1288834974657 (Nov 4, 2010 UTC).
+ */
+function tweetIdToTimestamp(statusId) {
+  const TWITTER_EPOCH = 1288834974657n;
+  const id = BigInt(statusId);
+  const timestampMs = Number((id >> 22n) + TWITTER_EPOCH);
+  return new Date(timestampMs);
+}
+
+/**
+ * Parse a marker string into { type, timestamp, tweetUrl?, tweetAuthor? }
+ * Returns null if the string is not a valid marker.
+ */
+function parseMarker(input) {
+  if (!input) return null;
+  const trimmed = input.trim();
+
+  // Try tweet URL first
+  const tweetMatch = trimmed.match(TWEET_REGEX);
+  if (tweetMatch) {
+    const author = tweetMatch[1];
+    const statusId = tweetMatch[2];
+    const timestamp = tweetIdToTimestamp(statusId);
+    if (isNaN(timestamp.getTime())) return { error: 'Could not resolve tweet timestamp. The tweet ID appears invalid.' };
+    if (timestamp.getTime() > Date.now()) return { error: 'Tweet timestamp is in the future — invalid tweet ID.' };
+    return {
+      type: 'tweet_url',
+      timestamp,
+      tweetUrl: trimmed.replace(/\?.*$/, ''), // strip query params like ?s=20
+      tweetAuthor: `@${author}`,
+    };
+  }
+
+  // Try MM/DD/YYYY date
+  const dateMatch = trimmed.match(DATE_REGEX);
+  if (dateMatch) {
+    const month = parseInt(dateMatch[1], 10);
+    const day = parseInt(dateMatch[2], 10);
+    const year = parseInt(dateMatch[3], 10);
+    if (month < 1 || month > 12) return { error: 'Invalid date. Month must be 1–12. Use MM/DD/YYYY format.' };
+    if (day < 1 || day > 31) return { error: 'Invalid date. Day must be 1–31. Use MM/DD/YYYY format.' };
+    const d = new Date(Date.UTC(year, month - 1, day));
+    if (isNaN(d.getTime())) return { error: 'Invalid date. Use MM/DD/YYYY format.' };
+    // Verify the date didn't roll over (e.g. Feb 30 → Mar 2)
+    if (d.getUTCMonth() !== month - 1 || d.getUTCDate() !== day) {
+      return { error: `Invalid date: ${month}/${day}/${year} does not exist. Use MM/DD/YYYY format.` };
+    }
+    if (d.getTime() > Date.now()) return { error: 'Marker date cannot be in the future.' };
+    return {
+      type: 'manual_date',
+      timestamp: d,
+    };
+  }
+
+  return null;
+}
+
+/**
+ * Find the candle index whose timestamp is closest to (but ≤) the target timestamp.
+ */
+function findMarkerCandleIndex(parsed, targetMs) {
+  let best = 0;
+  let bestDiff = Math.abs(parsed[0].t - targetMs);
+  for (let i = 1; i < parsed.length; i++) {
+    const diff = Math.abs(parsed[i].t - targetMs);
+    if (diff < bestDiff) {
+      bestDiff = diff;
+      best = i;
+    }
+  }
+  return best;
+}
+
 async function fetchCandlesRaw(coin, interval, startTime, endTime) {
   const res = await fetch(HL_API, {
     method: 'POST',
@@ -189,6 +269,7 @@ function escapeXml(str) {
 
 function buildCandlestickSvg(candles, coin, interval, label, opts = {}) {
   const showSwings = opts.showSwings || false;
+  const markerData = opts.marker || null; // { type, timestamp, tweetUrl?, tweetAuthor? }
   const W = 900;
   const CHART_H = 500;
   const PAD_TOP = 50, PAD_BOTTOM = 60, PAD_LEFT = 20, PAD_RIGHT = 90;
@@ -260,6 +341,7 @@ function buildCandlestickSvg(candles, coin, interval, label, opts = {}) {
   const SWING_DOT_COLOR = '#38bdf8';    // sky blue
   const SWING_UP_COLOR = '#4ade80';     // light green
   const SWING_DOWN_COLOR = '#f87171';   // light red
+  const MARKER_COLOR = '#38bdf8';       // sky blue (same as swing dot)
 
   let svgParts = [];
 
@@ -298,6 +380,70 @@ function buildCandlestickSvg(candles, coin, interval, label, opts = {}) {
     const bodyH = Math.max(1, bodyBot - bodyTop);
     const halfW = candleWidth / 2;
     svgParts.push(`<rect x="${x - halfW}" y="${bodyTop}" width="${candleWidth}" height="${bodyH}" fill="${color}" rx="1"/>`);
+  }
+
+  // ─── Marker Overlay ───
+  let markerEvent = null;
+  if (markerData && parsed.length > 0) {
+    const targetMs = markerData.timestamp.getTime();
+    const markerIdx = findMarkerCandleIndex(parsed, targetMs);
+    const markerCandle = parsed[markerIdx];
+    const refPrice = markerCandle.c;
+    const markerPctChange = ((currentPrice - refPrice) / refPrice * 100);
+    const markerX = indexToX(markerIdx);
+    const markerY = priceToY(refPrice);
+    const lastX = indexToX(parsed.length - 1);
+
+    // Vertical dashed line at marker candle
+    svgParts.push(`<line x1="${markerX}" y1="${PAD_TOP}" x2="${markerX}" y2="${CHART_H - PAD_BOTTOM}" stroke="${MARKER_COLOR}" stroke-width="1" stroke-dasharray="4,3" opacity="0.5"/>`);
+
+    // Horizontal reference line from marker to right edge
+    svgParts.push(`<line x1="${markerX}" y1="${markerY}" x2="${W - PAD_RIGHT}" y2="${markerY}" stroke="${MARKER_COLOR}" stroke-width="1" stroke-dasharray="4,3" opacity="0.3"/>`);
+
+    // Marker dot
+    svgParts.push(`<circle cx="${markerX}" cy="${markerY}" r="5" fill="${MARKER_COLOR}" stroke="${BG}" stroke-width="2"/>`);
+
+    // Date label below chart area at marker X
+    const markerDateStr = formatDateLabel(markerCandle.t, interval);
+    const sourceLabel = markerData.type === 'tweet_url' ? `${markerData.tweetAuthor}` : markerDateStr;
+    svgParts.push(`<rect x="${markerX - 40}" y="${CHART_H - PAD_BOTTOM + 32}" width="80" height="14" rx="2" fill="${BG}" opacity="0.9"/>`);
+    svgParts.push(`<text x="${markerX}" y="${CHART_H - PAD_BOTTOM + 43}" text-anchor="middle" fill="${MARKER_COLOR}" font-family="Arial,sans-serif" font-size="9" font-weight="bold">${escapeXml(sourceLabel)}</text>`);
+
+    // Percent-change badge near the last candle
+    const pctSign = markerPctChange >= 0 ? '+' : '';
+    const pctStr = `${pctSign}${markerPctChange.toFixed(2)}%`;
+    const badgeColor = markerPctChange >= 0 ? SWING_UP_COLOR : SWING_DOWN_COLOR;
+    const badgeLabel = markerData.type === 'tweet_url'
+      ? `${pctStr} since ${markerData.tweetAuthor} tweet`
+      : `${pctStr} since ${markerDateStr}`;
+    const badgeX = lastX;
+    const badgeY = priceToY(currentPrice) - 16;
+    const badgeW = badgeLabel.length * 6.5 + 16;
+    svgParts.push(`<rect x="${badgeX - badgeW / 2}" y="${badgeY - 10}" width="${badgeW}" height="16" rx="3" fill="${BG}" opacity="0.9"/>`);
+    svgParts.push(`<text x="${badgeX}" y="${badgeY + 2}" text-anchor="middle" fill="${badgeColor}" font-family="Arial,sans-serif" font-size="11" font-weight="bold">${escapeXml(badgeLabel)}</text>`);
+
+    // Build marker event object
+    const markerDateFormatted = markerData.timestamp.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    const direction = markerPctChange >= 0 ? 'up' : 'down';
+    let summaryText;
+    if (markerData.type === 'tweet_url') {
+      summaryText = `${coin.toUpperCase()} is ${direction} ${pctSign}${markerPctChange.toFixed(2)}% since ${markerData.tweetAuthor} tweet on ${markerDateFormatted}`;
+    } else {
+      summaryText = `${coin.toUpperCase()} is ${direction} ${pctSign}${markerPctChange.toFixed(2)}% since ${markerDateFormatted}`;
+    }
+
+    markerEvent = {
+      asset: coin.toUpperCase(),
+      timeframe: interval,
+      marker_source: markerData.type,
+      marker_timestamp: markerData.timestamp.toISOString(),
+      reference_price: refPrice,
+      current_price: currentPrice,
+      percent_change: parseFloat(markerPctChange.toFixed(2)),
+      summary: summaryText,
+    };
+    if (markerData.tweetUrl) markerEvent.tweet_url = markerData.tweetUrl;
+    if (markerData.tweetAuthor) markerEvent.tweet_author = markerData.tweetAuthor;
   }
 
   // ─── Swing Overlay ───
@@ -361,7 +507,7 @@ function buildCandlestickSvg(candles, coin, interval, label, opts = {}) {
 
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${svgParts.join('')}</svg>`;
 
-  return { svg, currentPrice, change, changeSymbol, swings, swingChanges, summaryLines };
+  return { svg, currentPrice, change, changeSymbol, swings, swingChanges, summaryLines, markerEvent };
 }
 
 async function renderCandlestickChart(candles, coin, interval, label, opts = {}) {
@@ -369,7 +515,7 @@ async function renderCandlestickChart(candles, coin, interval, label, opts = {})
 
   const buffer = await sharp(Buffer.from(result.svg)).png().toBuffer();
 
-  return { buffer, currentPrice: result.currentPrice, change: result.change, changeSymbol: result.changeSymbol, swings: result.swings, swingChanges: result.swingChanges, summaryLines: result.summaryLines };
+  return { buffer, currentPrice: result.currentPrice, change: result.change, changeSymbol: result.changeSymbol, swings: result.swings, swingChanges: result.swingChanges, summaryLines: result.summaryLines, markerEvent: result.markerEvent };
 }
 
 // ─── Chart data cache (for AI analysis button + ! chat ingestion) ───
@@ -464,18 +610,59 @@ async function generateChart(ticker, timeframe, opts = {}) {
     throw new Error(`Invalid timeframe \`${timeframe}\`. Supported: ${Object.keys(TIMEFRAMES).join(', ')}`);
   }
 
-  const { candles, resolvedCoin, isTradfi } = await fetchCandles(coin, tf.interval, tf.candles);
+  // Parse marker if provided (raw string from user input)
+  let markerData = null;
+  if (opts.markerInput) {
+    const parsed = parseMarker(opts.markerInput);
+    if (parsed && parsed.error) throw new Error(parsed.error);
+    if (parsed) markerData = parsed;
+  }
+
+  // Determine how many candles we need — extend if marker is before the default window
+  let candleCount = tf.candles;
+  if (markerData) {
+    const intervalMs = INTERVAL_MS[tf.interval] || 60 * 60 * 1000;
+    const candlesNeeded = Math.ceil((Date.now() - markerData.timestamp.getTime()) / intervalMs) + 5;
+    if (candlesNeeded > candleCount) {
+      candleCount = Math.min(candlesNeeded, 500); // cap at 500 candles
+    }
+  }
+
+  const { candles, resolvedCoin, isTradfi } = await fetchCandles(coin, tf.interval, candleCount);
+
+  // Verify marker falls within fetched data
+  if (markerData) {
+    const firstCandleTime = candles[0].t;
+    if (markerData.timestamp.getTime() < firstCandleTime - (INTERVAL_MS[tf.interval] || 3600000)) {
+      throw new Error(`Marker date is too far back for the \`${tf.label}\` timeframe. Try a longer timeframe (e.g. \`1d\` or \`1w\`).`);
+    }
+  }
 
   const displayName = resolvedCoin.includes(':') ? resolvedCoin.split(':')[1] : resolvedCoin;
   const assetTag = isTradfi ? ' (Stock)' : '';
 
-  const { buffer, currentPrice, change, changeSymbol, swings, swingChanges, summaryLines } = await renderCandlestickChart(candles, displayName, tf.interval, tf.label, opts);
+  const renderOpts = { ...opts };
+  if (markerData) renderOpts.marker = markerData;
+
+  const { buffer, currentPrice, change, changeSymbol, swings, swingChanges, summaryLines, markerEvent } = await renderCandlestickChart(candles, displayName, tf.interval, tf.label, renderOpts);
 
   const file = new AttachmentBuilder(buffer, { name: 'chart.png' });
   const changeColor = parseFloat(change) >= 0 ? 0x22c55e : 0xef4444;
 
   // Build description with optional swing summary text for embed
   let description = `${changeSymbol} **${change}%** | Data via Hyperliquid`;
+
+  // Marker line in embed
+  if (markerEvent) {
+    const pctSign = markerEvent.percent_change >= 0 ? '+' : '';
+    const markerDateFmt = new Date(markerEvent.marker_timestamp).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    if (markerEvent.marker_source === 'tweet_url') {
+      description += `\n\n\uD83D\uDCCC **Marker:** ${markerEvent.tweet_author} tweet (${markerDateFmt}) \u2192 **${pctSign}${markerEvent.percent_change}%** ($${formatPrice(markerEvent.reference_price)} \u2192 $${formatPrice(markerEvent.current_price)})`;
+    } else {
+      description += `\n\n\uD83D\uDCCC **Marker:** ${markerDateFmt} \u2192 **${pctSign}${markerEvent.percent_change}%** ($${formatPrice(markerEvent.reference_price)} \u2192 $${formatPrice(markerEvent.current_price)})`;
+    }
+  }
+
   if (opts.showSwings && summaryLines && summaryLines.length > 0) {
     description += '\n\n**Swing Breakdown:**';
     for (const line of summaryLines) {
@@ -483,12 +670,16 @@ async function generateChart(ticker, timeframe, opts = {}) {
     }
   }
 
+  const footerParts = [`${candles.length} candles`, `${tf.label} timeframe`];
+  if (opts.showSwings) footerParts.push('Swing %');
+  if (markerEvent) footerParts.push('Marker');
+
   const embed = new EmbedBuilder()
     .setTitle(`${displayName}${assetTag} \u00B7 ${tf.label} \u00B7 $${formatPrice(currentPrice)}`)
     .setColor(changeColor)
     .setDescription(description.slice(0, 4090))
     .setImage('attachment://chart.png')
-    .setFooter({ text: `${candles.length} candles \u00B7 ${tf.label} timeframe${opts.showSwings ? ' \u00B7 Swing %' : ''}` })
+    .setFooter({ text: footerParts.join(' \u00B7 ') })
     .setTimestamp();
 
   const row = new ActionRowBuilder().addComponents(
@@ -499,7 +690,7 @@ async function generateChart(ticker, timeframe, opts = {}) {
       .setEmoji('\uD83D\uDD0D'),
   );
 
-  return { embed, file, row, buffer, displayName, tf, swings, swingChanges };
+  return { embed, file, row, buffer, displayName, tf, swings, swingChanges, markerEvent };
 }
 
 // ─── Module Export ───
@@ -514,13 +705,15 @@ module.exports = {
   generateChart,
   detectSwings,
   calcSwingChanges,
+  parseMarker,
 
   async execute(interaction) {
     const ticker = interaction.options.getString('ticker');
     const timeframe = interaction.options.getString('timeframe') || '1h';
+    const markerInput = interaction.options.getString('marker') || null;
 
     try {
-      const { embed, file, row, buffer, displayName, tf } = await generateChart(ticker, timeframe);
+      const { embed, file, row, buffer, displayName, tf } = await generateChart(ticker, timeframe, { markerInput });
 
       cacheChart(interaction.channelId, buffer, displayName, tf.label);
 
