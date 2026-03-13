@@ -282,7 +282,7 @@ async function runChartAnalysis(interaction) {
   const preferredModel = visionModels.find(m => m.id.includes('claude-sonnet-4.6')) || visionModels[0];
 
   const progressEmbed = new EmbedBuilder()
-    .setTitle(`AI Analysis — ${cached.ticker} · ${cached.timeframe}`)
+    .setTitle(`AI Analysis \u2014 ${cached.ticker} \u00B7 ${cached.timeframe}`)
     .setColor(0x3b82f6)
     .setDescription(`Analyzing chart with **${preferredModel.name}**...`);
 
@@ -296,7 +296,7 @@ async function runChartAnalysis(interaction) {
     });
 
     const resultEmbed = new EmbedBuilder()
-      .setTitle(`AI Analysis — ${cached.ticker} · ${cached.timeframe}`)
+      .setTitle(`AI Analysis \u2014 ${cached.ticker} \u00B7 ${cached.timeframe}`)
       .setColor(0x3b82f6)
       .setDescription(response.slice(0, 4090))
       .setFooter({ text: `Powered by ${preferredModel.name}` })
@@ -306,11 +306,49 @@ async function runChartAnalysis(interaction) {
   } catch (err) {
     console.error('[chart AI analysis] Error:', err.message);
     const errorEmbed = new EmbedBuilder()
-      .setTitle('AI Analysis — Error')
+      .setTitle('AI Analysis \u2014 Error')
       .setColor(0xef4444)
       .setDescription(`Analysis failed: ${err.message}\n\nPlease try again.`);
     await interaction.editReply({ embeds: [errorEmbed], components: [] });
   }
+}
+
+// ─── Reusable chart generation (used by /chart and fc command) ───
+
+async function generateChart(ticker, timeframe) {
+  const coin = ticker.toUpperCase().replace(/[-/].*$/, '').replace(/USDT?$|USD$|PERP$/i, '');
+  const tf = TIMEFRAMES[timeframe];
+  if (!tf) {
+    throw new Error(`Invalid timeframe \`${timeframe}\`. Supported: ${Object.keys(TIMEFRAMES).join(', ')}`);
+  }
+
+  const { candles, resolvedCoin, isTradfi } = await fetchCandles(coin, tf.interval, tf.candles);
+
+  const displayName = resolvedCoin.includes(':') ? resolvedCoin.split(':')[1] : resolvedCoin;
+  const assetTag = isTradfi ? ' (Stock)' : '';
+
+  const { buffer, currentPrice, change, changeSymbol } = await renderCandlestickChart(candles, displayName, tf.interval, tf.label);
+
+  const file = new AttachmentBuilder(buffer, { name: 'chart.png' });
+  const changeColor = parseFloat(change) >= 0 ? 0x22c55e : 0xef4444;
+
+  const embed = new EmbedBuilder()
+    .setTitle(`${displayName}${assetTag} \u00B7 ${tf.label} \u00B7 $${formatPrice(currentPrice)}`)
+    .setColor(changeColor)
+    .setDescription(`${changeSymbol} **${change}%** | Data via Hyperliquid`)
+    .setImage('attachment://chart.png')
+    .setFooter({ text: `${candles.length} candles \u00B7 ${tf.label} timeframe` })
+    .setTimestamp();
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId('chart_analyze')
+      .setLabel('AI Analysis')
+      .setStyle(ButtonStyle.Primary)
+      .setEmoji('\uD83D\uDD0D'),
+  );
+
+  return { embed, file, row, buffer, displayName, tf };
 }
 
 // ─── Module Export ───
@@ -321,59 +359,29 @@ module.exports = {
   needsEntries: false,
   isModal: false,
   publicReply: true,
+  TIMEFRAMES,
+  generateChart,
 
   async execute(interaction) {
     const ticker = interaction.options.getString('ticker');
     const timeframe = interaction.options.getString('timeframe') || '1h';
-    const coin = ticker.toUpperCase().replace(/[-/].*$/, '').replace(/USDT?$|USD$|PERP$/i, '');
-
-    const tf = TIMEFRAMES[timeframe];
-    if (!tf) {
-      await interaction.editReply({ content: `Invalid timeframe \`${timeframe}\`. Supported: ${Object.keys(TIMEFRAMES).join(', ')}` });
-      return;
-    }
 
     try {
-      const { candles, resolvedCoin, isTradfi } = await fetchCandles(coin, tf.interval, tf.candles);
+      const { embed, file, row, buffer, displayName, tf } = await generateChart(ticker, timeframe);
 
-      // Display name: strip builder prefix for clean titles (e.g. "xyz:NVDA" → "NVDA")
-      const displayName = resolvedCoin.includes(':') ? resolvedCoin.split(':')[1] : resolvedCoin;
-      const assetTag = isTradfi ? ' (Stock)' : '';
-
-      const { buffer, currentPrice, change, changeSymbol } = await renderCandlestickChart(candles, displayName, tf.interval, tf.label);
-
-      const file = new AttachmentBuilder(buffer, { name: 'chart.png' });
-      const changeColor = parseFloat(change) >= 0 ? 0x22c55e : 0xef4444;
-
-      const embed = new EmbedBuilder()
-        .setTitle(`${displayName}${assetTag} \u00B7 ${tf.label} \u00B7 $${formatPrice(currentPrice)}`)
-        .setColor(changeColor)
-        .setDescription(`${changeSymbol} **${change}%** | Data via Hyperliquid`)
-        .setImage('attachment://chart.png')
-        .setFooter({ text: `${candles.length} candles \u00B7 ${tf.label} timeframe` })
-        .setTimestamp();
-
-      // Cache chart buffer for AI analysis button and ! chat vision
-      const channelId = interaction.channelId;
-      cacheChart(channelId, buffer, displayName, tf.label);
-
-      const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-          .setCustomId('chart_analyze')
-          .setLabel('AI Analysis')
-          .setStyle(ButtonStyle.Primary)
-          .setEmoji('🔍'),
-      );
+      cacheChart(interaction.channelId, buffer, displayName, tf.label);
 
       await interaction.editReply({ embeds: [embed], files: [file], components: [row] });
     } catch (err) {
       console.error('[/chart] Error:', err.message);
 
+      const coin = ticker.toUpperCase().replace(/[-/].*$/, '').replace(/USDT?$|USD$|PERP$/i, '');
+      const tf = TIMEFRAMES[timeframe];
       const errorEmbed = new EmbedBuilder()
         .setTitle('Chart Error')
         .setColor(0xef4444)
         .setDescription(
-          `**Ticker:** ${coin}\n**Timeframe:** ${tf.label}\n\n` +
+          `**Ticker:** ${coin}\n**Timeframe:** ${tf ? tf.label : timeframe}\n\n` +
           `${err.message}`
         );
       await interaction.editReply({ embeds: [errorEmbed] });
@@ -386,4 +394,5 @@ module.exports = {
   },
 
   getCachedChart,
+  cacheChart,
 };

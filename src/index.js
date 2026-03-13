@@ -652,6 +652,44 @@ client.on('interactionCreate', async (interaction) => {
   }
 });
 
+// ─── fc command: "fc [ticker] [timeframe]" chat shortcut for /chart ───
+const FC_REGEX = /^fc\s+(\S+)(?:\s+(\S+))?\s*$/i;
+
+client.on('messageCreate', async (message) => {
+  if (message.author.bot) return;
+
+  const match = message.content.match(FC_REGEX);
+  if (!match) return;
+
+  const ticker = match[1];
+  const timeframe = match[2] || '1h';
+
+  // Validate timeframe early
+  const validTimeframes = Object.keys(chartCmd.TIMEFRAMES);
+  if (!chartCmd.TIMEFRAMES[timeframe]) {
+    await message.reply(
+      `Invalid timeframe \`${timeframe}\`.\nSupported: ${validTimeframes.map(t => `\`${t}\``).join(', ')}\n\nUsage: \`fc <ticker> <timeframe>\` — e.g. \`fc BTC 4h\``
+    );
+    return;
+  }
+
+  console.log(`[fc] ${message.author.username}: fc ${ticker} ${timeframe}`);
+
+  try {
+    await message.channel.sendTyping();
+
+    const { embed, file, row, buffer, displayName, tf } = await chartCmd.generateChart(ticker, timeframe);
+
+    // Cache chart for AI analysis button and ! chat vision
+    chartCmd.cacheChart(message.channelId, buffer, displayName, tf.label);
+
+    await message.reply({ embeds: [embed], files: [file], components: [row] });
+  } catch (err) {
+    console.error('[fc] Error:', err.message);
+    await message.reply(err.message || 'Failed to fetch chart. Please check the ticker and try again.').catch(() => {});
+  }
+});
+
 // Prefix chat: ! followed by message text
 client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
