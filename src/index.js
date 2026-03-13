@@ -652,14 +652,26 @@ client.on('interactionCreate', async (interaction) => {
   }
 });
 
-// ─── fc command: "fc [ticker] [timeframe]" chat shortcut for /chart ───
-const FC_REGEX = /^fc\s+(\S+)(?:\s+(\S+))?\s*$/i;
+// ─── fc command: "fc [ticker] [timeframe]" or "fc [ticker] [timeframe]%" chat shortcut for /chart ───
+// Trailing % enables swing-percentage overlay (e.g. "fc BTC 4h%", "fc ETH 1d %")
+const FC_REGEX = /^fc\s+(\S+)(?:\s+(\S+?))?\s*(%?)\s*$/i;
+// Also match when % is glued to the timeframe like "fc BTC 4h%"
+const FC_REGEX_PCT_GLUED = /^fc\s+(\S+)\s+(\S+)%\s*$/i;
 
 client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
 
-  const match = message.content.match(FC_REGEX);
-  if (!match) return;
+  // Try the glued-% regex first (e.g. "fc BTC 4h%"), then the standard regex
+  let match = message.content.match(FC_REGEX_PCT_GLUED);
+  let showSwings = false;
+
+  if (match) {
+    showSwings = true;
+  } else {
+    match = message.content.match(FC_REGEX);
+    if (!match) return;
+    showSwings = match[3] === '%';
+  }
 
   const ticker = match[1];
   const timeframe = match[2] || '1h';
@@ -668,17 +680,17 @@ client.on('messageCreate', async (message) => {
   const validTimeframes = Object.keys(chartCmd.TIMEFRAMES);
   if (!chartCmd.TIMEFRAMES[timeframe]) {
     await message.reply(
-      `Invalid timeframe \`${timeframe}\`.\nSupported: ${validTimeframes.map(t => `\`${t}\``).join(', ')}\n\nUsage: \`fc <ticker> <timeframe>\` — e.g. \`fc BTC 4h\``
+      `Invalid timeframe \`${timeframe}\`.\nSupported: ${validTimeframes.map(t => `\`${t}\``).join(', ')}\n\nUsage: \`fc <ticker> <timeframe>\` — e.g. \`fc BTC 4h\`\nAdd \`%\` for swing analysis: \`fc BTC 4h%\``
     );
     return;
   }
 
-  console.log(`[fc] ${message.author.username}: fc ${ticker} ${timeframe}`);
+  console.log(`[fc] ${message.author.username}: fc ${ticker} ${timeframe}${showSwings ? ' (swing %)' : ''}`);
 
   try {
     await message.channel.sendTyping();
 
-    const { embed, file, row, buffer, displayName, tf } = await chartCmd.generateChart(ticker, timeframe);
+    const { embed, file, row, buffer, displayName, tf } = await chartCmd.generateChart(ticker, timeframe, { showSwings });
 
     // Cache chart for AI analysis button and ! chat vision
     chartCmd.cacheChart(message.channelId, buffer, displayName, tf.label);

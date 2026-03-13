@@ -83,6 +83,72 @@ async function fetchCandles(coin, interval, count) {
   );
 }
 
+// ─── Swing Detection ───
+
+/**
+ * Detect swing highs and swing lows using a zigzag approach.
+ * A swing high is a candle whose high >= the highs of `lookback` candles on each side.
+ * A swing low  is a candle whose low  <= the lows  of `lookback` candles on each side.
+ * Returns an array of { index, price, type: 'high'|'low', timestamp } sorted by index,
+ * alternating between highs and lows (zigzag).
+ */
+function detectSwings(parsed, lookback = 5) {
+  const swingHighs = [];
+  const swingLows = [];
+
+  for (let i = lookback; i < parsed.length - lookback; i++) {
+    let isHigh = true;
+    let isLow = true;
+    for (let j = 1; j <= lookback; j++) {
+      if (parsed[i].h < parsed[i - j].h || parsed[i].h < parsed[i + j].h) isHigh = false;
+      if (parsed[i].l > parsed[i - j].l || parsed[i].l > parsed[i + j].l) isLow = false;
+      if (!isHigh && !isLow) break;
+    }
+    if (isHigh) swingHighs.push({ index: i, price: parsed[i].h, type: 'high', timestamp: parsed[i].t });
+    if (isLow) swingLows.push({ index: i, price: parsed[i].l, type: 'low', timestamp: parsed[i].t });
+  }
+
+  // Merge and sort by index, then build zigzag (alternate high/low)
+  const all = [...swingHighs, ...swingLows].sort((a, b) => a.index - b.index);
+  if (all.length === 0) return [];
+
+  const zigzag = [all[0]];
+  for (let i = 1; i < all.length; i++) {
+    const last = zigzag[zigzag.length - 1];
+    if (all[i].type === last.type) {
+      // Same type — keep the more extreme one
+      if (all[i].type === 'high' && all[i].price > last.price) {
+        zigzag[zigzag.length - 1] = all[i];
+      } else if (all[i].type === 'low' && all[i].price < last.price) {
+        zigzag[zigzag.length - 1] = all[i];
+      }
+    } else {
+      zigzag.push(all[i]);
+    }
+  }
+
+  return zigzag;
+}
+
+/**
+ * Calculate percentage changes between consecutive swing points.
+ */
+function calcSwingChanges(swings) {
+  const changes = [];
+  for (let i = 1; i < swings.length; i++) {
+    const prev = swings[i - 1];
+    const curr = swings[i];
+    const pctChange = ((curr.price - prev.price) / prev.price * 100);
+    changes.push({
+      from: prev,
+      to: curr,
+      pctChange: pctChange.toFixed(2),
+      direction: pctChange >= 0 ? 'up' : 'down',
+    });
+  }
+  return changes;
+}
+
 // ─── SVG Candlestick Renderer ───
 
 function formatPrice(price) {
@@ -121,11 +187,13 @@ function escapeXml(str) {
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-function buildCandlestickSvg(candles, coin, interval, label) {
-  const W = 900, H = 500;
+function buildCandlestickSvg(candles, coin, interval, label, opts = {}) {
+  const showSwings = opts.showSwings || false;
+  const W = 900;
+  const CHART_H = 500;
   const PAD_TOP = 50, PAD_BOTTOM = 60, PAD_LEFT = 20, PAD_RIGHT = 90;
   const chartW = W - PAD_LEFT - PAD_RIGHT;
-  const chartH = H - PAD_TOP - PAD_BOTTOM;
+  const chartH = CHART_H - PAD_TOP - PAD_BOTTOM;
 
   const lastCandle = candles[candles.length - 1];
   const firstCandle = candles[0];
@@ -160,12 +228,38 @@ function buildCandlestickSvg(candles, coin, interval, label) {
   const gap = chartW / parsed.length;
   const indexToX = (i) => PAD_LEFT + gap * i + gap / 2;
 
+  // Detect swings if requested
+  const lookback = Math.max(3, Math.min(7, Math.floor(parsed.length / 12)));
+  const swings = showSwings ? detectSwings(parsed, lookback) : [];
+  const swingChanges = showSwings ? calcSwingChanges(swings) : [];
+
+  // Build summary lines for swing overlay
+  let summaryLines = [];
+  if (showSwings && swingChanges.length > 0) {
+    for (const sc of swingChanges) {
+      const dir = sc.direction === 'up' ? '\u25B2' : '\u25BC';
+      const fromLabel = formatDateLabel(sc.from.timestamp, interval);
+      const toLabel = formatDateLabel(sc.to.timestamp, interval);
+      summaryLines.push(`${dir} ${sc.pctChange}%  $${formatPrice(sc.from.price)} \u2192 $${formatPrice(sc.to.price)}  (${fromLabel} \u2013 ${toLabel})`);
+    }
+  }
+
+  // Calculate total SVG height: chart + optional summary
+  const SUMMARY_LINE_H = 18;
+  const SUMMARY_PAD = showSwings && summaryLines.length > 0 ? 16 : 0;
+  const summaryH = summaryLines.length > 0 ? SUMMARY_PAD + summaryLines.length * SUMMARY_LINE_H + 10 : 0;
+  const H = CHART_H + summaryH;
+
   const GREEN = '#22c55e';
   const RED = '#ef4444';
   const BG = '#1f2937';
   const GRID = 'rgba(75,85,99,0.3)';
   const TEXT_COLOR = '#9ca3af';
   const TITLE_COLOR = '#e5e7eb';
+  const SWING_LINE_COLOR = '#facc15';   // yellow
+  const SWING_DOT_COLOR = '#38bdf8';    // sky blue
+  const SWING_UP_COLOR = '#4ade80';     // light green
+  const SWING_DOWN_COLOR = '#f87171';   // light red
 
   let svgParts = [];
 
@@ -173,7 +267,8 @@ function buildCandlestickSvg(candles, coin, interval, label) {
   svgParts.push(`<rect width="${W}" height="${H}" fill="${BG}"/>`);
 
   // Title
-  const titleText = `${escapeXml(coin.toUpperCase())}  \u00B7  ${escapeXml(label)}  \u00B7  $${escapeXml(formatPrice(currentPrice))}  ${changeSymbol} ${change}%`;
+  const swingTag = showSwings ? '  \u00B7  Swing %' : '';
+  const titleText = `${escapeXml(coin.toUpperCase())}  \u00B7  ${escapeXml(label)}  \u00B7  $${escapeXml(formatPrice(currentPrice))}  ${changeSymbol} ${change}%${swingTag}`;
   svgParts.push(`<text x="${W / 2}" y="30" text-anchor="middle" fill="${TITLE_COLOR}" font-family="Arial,sans-serif" font-size="16" font-weight="bold">${titleText}</text>`);
 
   // Y-axis grid lines and labels (right side)
@@ -205,29 +300,76 @@ function buildCandlestickSvg(candles, coin, interval, label) {
     svgParts.push(`<rect x="${x - halfW}" y="${bodyTop}" width="${candleWidth}" height="${bodyH}" fill="${color}" rx="1"/>`);
   }
 
+  // ─── Swing Overlay ───
+  if (showSwings && swings.length >= 2) {
+    // Draw zigzag lines connecting swing points
+    for (let i = 1; i < swings.length; i++) {
+      const prev = swings[i - 1];
+      const curr = swings[i];
+      const x1 = indexToX(prev.index);
+      const y1 = priceToY(prev.price);
+      const x2 = indexToX(curr.index);
+      const y2 = priceToY(curr.price);
+      svgParts.push(`<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${SWING_LINE_COLOR}" stroke-width="2" stroke-dasharray="6,3" opacity="0.85"/>`);
+
+      // Percentage label at midpoint of the line
+      const midX = (x1 + x2) / 2;
+      const midY = (y1 + y2) / 2;
+      const pct = swingChanges[i - 1].pctChange;
+      const pctColor = parseFloat(pct) >= 0 ? SWING_UP_COLOR : SWING_DOWN_COLOR;
+      const pctSign = parseFloat(pct) >= 0 ? '+' : '';
+      // Background rect for readability
+      svgParts.push(`<rect x="${midX - 28}" y="${midY - 12}" width="56" height="16" rx="3" fill="${BG}" opacity="0.85"/>`);
+      svgParts.push(`<text x="${midX}" y="${midY}" text-anchor="middle" fill="${pctColor}" font-family="Arial,sans-serif" font-size="11" font-weight="bold">${pctSign}${pct}%</text>`);
+    }
+
+    // Draw dots at each swing point
+    for (const s of swings) {
+      const x = indexToX(s.index);
+      const y = priceToY(s.price);
+      const dotColor = s.type === 'high' ? SWING_UP_COLOR : SWING_DOWN_COLOR;
+      svgParts.push(`<circle cx="${x}" cy="${y}" r="4" fill="${dotColor}" stroke="${BG}" stroke-width="1.5"/>`);
+    }
+  }
+
   // X-axis labels (show ~8 evenly spaced)
   const xLabelCount = Math.min(8, parsed.length);
   const xLabelStep = Math.floor(parsed.length / xLabelCount);
   for (let i = 0; i < parsed.length; i += xLabelStep) {
     const x = indexToX(i);
     const dateStr = formatDateLabel(parsed[i].t, interval);
-    svgParts.push(`<text x="${x}" y="${H - PAD_BOTTOM + 20}" text-anchor="middle" fill="${TEXT_COLOR}" font-family="Arial,sans-serif" font-size="10" transform="rotate(-35 ${x} ${H - PAD_BOTTOM + 20})">${escapeXml(dateStr)}</text>`);
+    svgParts.push(`<text x="${x}" y="${CHART_H - PAD_BOTTOM + 20}" text-anchor="middle" fill="${TEXT_COLOR}" font-family="Arial,sans-serif" font-size="10" transform="rotate(-35 ${x} ${CHART_H - PAD_BOTTOM + 20})">${escapeXml(dateStr)}</text>`);
   }
 
   // Data source watermark
-  svgParts.push(`<text x="${PAD_LEFT + 5}" y="${H - 8}" fill="${GRID}" font-family="Arial,sans-serif" font-size="10">Data via Hyperliquid</text>`);
+  svgParts.push(`<text x="${PAD_LEFT + 5}" y="${CHART_H - 8}" fill="${GRID}" font-family="Arial,sans-serif" font-size="10">Data via Hyperliquid</text>`);
+
+  // ─── Swing Summary Text (below chart) ───
+  if (showSwings && summaryLines.length > 0) {
+    const summaryStartY = CHART_H + SUMMARY_PAD;
+    // Separator line
+    svgParts.push(`<line x1="${PAD_LEFT}" y1="${CHART_H + 4}" x2="${W - PAD_RIGHT}" y2="${CHART_H + 4}" stroke="${GRID}" stroke-width="1"/>`);
+    // Summary header
+    svgParts.push(`<text x="${PAD_LEFT + 5}" y="${summaryStartY}" fill="${TITLE_COLOR}" font-family="Arial,sans-serif" font-size="12" font-weight="bold">Swing Summary</text>`);
+    for (let i = 0; i < summaryLines.length; i++) {
+      const ly = summaryStartY + (i + 1) * SUMMARY_LINE_H;
+      const line = summaryLines[i];
+      const lineColor = line.startsWith('\u25B2') ? SWING_UP_COLOR : SWING_DOWN_COLOR;
+      svgParts.push(`<text x="${PAD_LEFT + 10}" y="${ly}" fill="${lineColor}" font-family="monospace" font-size="11">${escapeXml(line)}</text>`);
+    }
+  }
 
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${svgParts.join('')}</svg>`;
 
-  return { svg, currentPrice, change, changeSymbol };
+  return { svg, currentPrice, change, changeSymbol, swings, swingChanges, summaryLines };
 }
 
-async function renderCandlestickChart(candles, coin, interval, label) {
-  const { svg, currentPrice, change, changeSymbol } = buildCandlestickSvg(candles, coin, interval, label);
+async function renderCandlestickChart(candles, coin, interval, label, opts = {}) {
+  const result = buildCandlestickSvg(candles, coin, interval, label, opts);
 
-  const buffer = await sharp(Buffer.from(svg)).png().toBuffer();
+  const buffer = await sharp(Buffer.from(result.svg)).png().toBuffer();
 
-  return { buffer, currentPrice, change, changeSymbol };
+  return { buffer, currentPrice: result.currentPrice, change: result.change, changeSymbol: result.changeSymbol, swings: result.swings, swingChanges: result.swingChanges, summaryLines: result.summaryLines };
 }
 
 // ─── Chart data cache (for AI analysis button + ! chat ingestion) ───
@@ -315,7 +457,7 @@ async function runChartAnalysis(interaction) {
 
 // ─── Reusable chart generation (used by /chart and fc command) ───
 
-async function generateChart(ticker, timeframe) {
+async function generateChart(ticker, timeframe, opts = {}) {
   const coin = ticker.toUpperCase().replace(/[-/].*$/, '').replace(/USDT?$|USD$|PERP$/i, '');
   const tf = TIMEFRAMES[timeframe];
   if (!tf) {
@@ -327,17 +469,26 @@ async function generateChart(ticker, timeframe) {
   const displayName = resolvedCoin.includes(':') ? resolvedCoin.split(':')[1] : resolvedCoin;
   const assetTag = isTradfi ? ' (Stock)' : '';
 
-  const { buffer, currentPrice, change, changeSymbol } = await renderCandlestickChart(candles, displayName, tf.interval, tf.label);
+  const { buffer, currentPrice, change, changeSymbol, swings, swingChanges, summaryLines } = await renderCandlestickChart(candles, displayName, tf.interval, tf.label, opts);
 
   const file = new AttachmentBuilder(buffer, { name: 'chart.png' });
   const changeColor = parseFloat(change) >= 0 ? 0x22c55e : 0xef4444;
 
+  // Build description with optional swing summary text for embed
+  let description = `${changeSymbol} **${change}%** | Data via Hyperliquid`;
+  if (opts.showSwings && summaryLines && summaryLines.length > 0) {
+    description += '\n\n**Swing Breakdown:**';
+    for (const line of summaryLines) {
+      description += `\n\`${line}\``;
+    }
+  }
+
   const embed = new EmbedBuilder()
     .setTitle(`${displayName}${assetTag} \u00B7 ${tf.label} \u00B7 $${formatPrice(currentPrice)}`)
     .setColor(changeColor)
-    .setDescription(`${changeSymbol} **${change}%** | Data via Hyperliquid`)
+    .setDescription(description.slice(0, 4090))
     .setImage('attachment://chart.png')
-    .setFooter({ text: `${candles.length} candles \u00B7 ${tf.label} timeframe` })
+    .setFooter({ text: `${candles.length} candles \u00B7 ${tf.label} timeframe${opts.showSwings ? ' \u00B7 Swing %' : ''}` })
     .setTimestamp();
 
   const row = new ActionRowBuilder().addComponents(
@@ -348,7 +499,7 @@ async function generateChart(ticker, timeframe) {
       .setEmoji('\uD83D\uDD0D'),
   );
 
-  return { embed, file, row, buffer, displayName, tf };
+  return { embed, file, row, buffer, displayName, tf, swings, swingChanges };
 }
 
 // ─── Module Export ───
@@ -361,6 +512,8 @@ module.exports = {
   publicReply: true,
   TIMEFRAMES,
   generateChart,
+  detectSwings,
+  calcSwingChanges,
 
   async execute(interaction) {
     const ticker = interaction.options.getString('ticker');
