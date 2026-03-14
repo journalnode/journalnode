@@ -458,6 +458,18 @@ client.on('interactionCreate', async (interaction) => {
           await interaction.reply({ content: errorMsg, flags: 64 }).catch(() => {});
         }
       }
+    } else if (interaction.customId.startsWith('view_chart_')) {
+      try {
+        await mytradesCmd.handleChartButton(interaction);
+      } catch (err) {
+        console.error('[/mytrades] View chart button failed:', err);
+        const errorMsg = 'Something went wrong loading the chart. Please try again.';
+        if (interaction.deferred || interaction.replied) {
+          await interaction.followUp({ content: errorMsg, flags: 64 }).catch(() => {});
+        } else {
+          await interaction.reply({ content: errorMsg, flags: 64 }).catch(() => {});
+        }
+      }
     } else if (interaction.customId.startsWith('close_trade_')) {
       try {
         await mytradesCmd.handleCloseButton(interaction);

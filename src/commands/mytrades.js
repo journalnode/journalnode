@@ -1,9 +1,31 @@
-const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
+const { EmbedBuilder, AttachmentBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
 const { getOpenTrades, closeTrade, getTradeByTradeId } = require('../tradeStore');
+const chartCmd = require('./chart');
 
 // Temporary storage for pending close data (screenshot attachment)
 // Keyed by `${userId}_${tradeId}`, cleared after modal submit
 const pendingCloses = new Map();
+
+// Map trade timeframes (e.g. "4H", "1D", "15M") to chart timeframes
+const TIMEFRAME_MAP = {
+  '1m': '1m', '3m': '3m', '5m': '5m', '15m': '15m', '30m': '30m',
+  '1h': '1h', '2h': '2h', '4h': '4h', '8h': '8h', '12h': '12h',
+  '1d': '1d', '3d': '3d', '1w': '1w', '1m': '1m',
+};
+
+function resolveChartTimeframe(tradeTimeframe) {
+  if (!tradeTimeframe) return '1d';
+  const normalized = tradeTimeframe.toLowerCase().trim();
+  // Direct match
+  if (chartCmd.TIMEFRAMES[normalized]) return normalized;
+  // Try common variations
+  if (TIMEFRAME_MAP[normalized]) return TIMEFRAME_MAP[normalized];
+  // Try stripping spaces and matching
+  const stripped = normalized.replace(/\s+/g, '');
+  if (chartCmd.TIMEFRAMES[stripped]) return stripped;
+  // Default
+  return '1d';
+}
 
 module.exports = {
   name: 'mytrades',
@@ -29,8 +51,9 @@ module.exports = {
 
     let desc = `You have **${openTrades.length}** open trade${openTrades.length > 1 ? 's' : ''}.\n\n`;
 
-    // Show up to 25 trades (5 action rows x 5 buttons max)
-    const tradesToShow = openTrades.slice(-25);
+    // With 2 buttons per trade (Chart + Close), we can fit 2 trades per row (4 buttons)
+    // 5 rows max = 10 trades visible
+    const tradesToShow = openTrades.slice(-10);
 
     for (const trade of tradesToShow) {
       const dirEmoji = trade.direction?.toLowerCase() === 'long' ? '📈' : '📉';
@@ -39,22 +62,26 @@ module.exports = {
       desc += `\`ID: ${trade.tradeId}\`\n\n`;
     }
 
-    if (openTrades.length > 25) {
-      desc += `_...and ${openTrades.length - 25} more. Close some trades to see older ones._\n`;
+    if (openTrades.length > 10) {
+      desc += `_...and ${openTrades.length - 10} more. Close some trades to see older ones._\n`;
     }
 
     embed.setDescription(desc);
 
-    // Build action rows with Close buttons (max 5 buttons per row, max 5 rows)
+    // Build action rows with Chart + Close button pairs (2 trades per row, max 5 rows)
     const rows = [];
-    for (let i = 0; i < tradesToShow.length && rows.length < 5; i += 5) {
+    for (let i = 0; i < tradesToShow.length && rows.length < 5; i += 2) {
       const row = new ActionRowBuilder();
-      const chunk = tradesToShow.slice(i, i + 5);
+      const chunk = tradesToShow.slice(i, i + 2);
       for (const trade of chunk) {
         row.addComponents(
           new ButtonBuilder()
+            .setCustomId(`view_chart_${trade.tradeId}`)
+            .setLabel(`📊 #${trade.id} ${trade.asset}`)
+            .setStyle(ButtonStyle.Primary),
+          new ButtonBuilder()
             .setCustomId(`close_trade_${trade.tradeId}`)
-            .setLabel(`Close #${trade.id} ${trade.asset}`)
+            .setLabel(`Close #${trade.id}`)
             .setStyle(ButtonStyle.Danger),
         );
       }
@@ -62,6 +89,55 @@ module.exports = {
     }
 
     await interaction.editReply({ embeds: [embed], components: rows });
+  },
+
+  async handleChartButton(interaction) {
+    const tradeId = interaction.customId.replace('view_chart_', '');
+    const userId = interaction.user.id;
+
+    const trade = getTradeByTradeId(userId, tradeId);
+    if (!trade) {
+      await interaction.reply({ content: 'Trade not found.', flags: 64 });
+      return;
+    }
+    if (trade.status === 'closed') {
+      await interaction.reply({ content: 'This trade is already closed.', flags: 64 });
+      return;
+    }
+
+    await interaction.deferReply();
+
+    const timeframe = resolveChartTimeframe(trade.timeframe);
+
+    try {
+      const { embed, file, row, buffer, displayName, tf } = await chartCmd.generateChart(
+        trade.asset,
+        timeframe,
+        { entryPrice: trade.entry },
+      );
+
+      // Cache chart for AI analysis button
+      chartCmd.cacheChart(interaction.channelId, buffer, displayName, tf.label);
+
+      // Add trade context to the embed description
+      const dirEmoji = trade.direction?.toLowerCase() === 'long' ? '📈' : '📉';
+      const entryVal = parseFloat(trade.entry);
+      const currentVal = parseFloat(embed.data.title.match(/\$[\d,.]+/)?.[0]?.replace(/[$,]/g, '') || '0');
+      const tradeContext = `\n\n${dirEmoji} **Active Trade #${trade.id}** — ${trade.direction} @ $${trade.entry}`;
+      const existingDesc = embed.data.description || '';
+      embed.setDescription(existingDesc + tradeContext);
+
+      await interaction.editReply({ embeds: [embed], files: [file], components: [row] });
+    } catch (err) {
+      console.error(`[/mytrades] Chart for trade #${trade.id} (${trade.asset}) failed:`, err.message);
+      const errorEmbed = new EmbedBuilder()
+        .setTitle('Chart Error')
+        .setColor(0xef4444)
+        .setDescription(
+          `Could not load chart for **${trade.asset}** (${timeframe}).\n\n${err.message}`
+        );
+      await interaction.editReply({ embeds: [errorEmbed] });
+    }
   },
 
   async handleCloseButton(interaction) {

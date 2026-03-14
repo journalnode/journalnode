@@ -278,6 +278,7 @@ function escapeXml(str) {
 function buildCandlestickSvg(candles, coin, interval, label, opts = {}) {
   const showSwings = opts.showSwings || false;
   const markerData = opts.marker || null; // { type, timestamp, tweetUrl?, tweetAuthor? }
+  const entryPrice = opts.entryPrice ? parseFloat(opts.entryPrice) : null; // horizontal entry-price line
   const W = 900;
   const CHART_H = 500;
   const PAD_TOP = 50, PAD_BOTTOM = 60, PAD_LEFT = 20, PAD_RIGHT = 90;
@@ -452,6 +453,36 @@ function buildCandlestickSvg(candles, coin, interval, label, opts = {}) {
     };
     if (markerData.tweetUrl) markerEvent.tweet_url = markerData.tweetUrl;
     if (markerData.tweetAuthor) markerEvent.tweet_author = markerData.tweetAuthor;
+  }
+
+  // ─── Entry-Price Overlay ───
+  if (entryPrice !== null && !isNaN(entryPrice) && parsed.length > 0) {
+    const entryY = priceToY(entryPrice);
+    const ENTRY_COLOR = '#facc15'; // yellow
+    const entryPctChange = ((currentPrice - entryPrice) / entryPrice * 100);
+    const entryPctSign = entryPctChange >= 0 ? '+' : '';
+    const entryPctStr = `${entryPctSign}${entryPctChange.toFixed(2)}%`;
+    const entryBadgeColor = entryPctChange >= 0 ? GREEN : RED;
+
+    // Only draw if entry price is within the visible y-range (with margin)
+    if (entryPrice >= yMin && entryPrice <= yMax) {
+      // Horizontal dashed line across the chart at entry price
+      svgParts.push(`<line x1="${PAD_LEFT}" y1="${entryY}" x2="${W - PAD_RIGHT}" y2="${entryY}" stroke="${ENTRY_COLOR}" stroke-width="1.5" stroke-dasharray="6,4" opacity="0.7"/>`);
+
+      // Entry price label on the right axis
+      const entryLabelText = `Entry $${formatAxisPrice(entryPrice).replace('$', '')}`;
+      const entryLabelW = entryLabelText.length * 6.5 + 10;
+      svgParts.push(`<rect x="${W - PAD_RIGHT + 2}" y="${entryY - 8}" width="${entryLabelW}" height="16" rx="3" fill="${ENTRY_COLOR}" opacity="0.9"/>`);
+      svgParts.push(`<text x="${W - PAD_RIGHT + 2 + entryLabelW / 2}" y="${entryY + 4}" text-anchor="middle" fill="${BG}" font-family="Arial,sans-serif" font-size="10" font-weight="bold">${escapeXml(entryLabelText)}</text>`);
+    }
+
+    // Percent-change badge from entry to current price (top-right area)
+    const badgeText = `${entryPctStr} from entry`;
+    const entryBadgeW = badgeText.length * 6.5 + 16;
+    const entryBadgeX = W - PAD_RIGHT - entryBadgeW / 2 - 5;
+    const entryBadgeY = PAD_TOP + 16;
+    svgParts.push(`<rect x="${entryBadgeX - entryBadgeW / 2}" y="${entryBadgeY - 10}" width="${entryBadgeW}" height="18" rx="4" fill="${BG}" stroke="${entryBadgeColor}" stroke-width="1" opacity="0.95"/>`);
+    svgParts.push(`<text x="${entryBadgeX}" y="${entryBadgeY + 3}" text-anchor="middle" fill="${entryBadgeColor}" font-family="Arial,sans-serif" font-size="12" font-weight="bold">${escapeXml(badgeText)}</text>`);
   }
 
   // ─── Swing Overlay ───
