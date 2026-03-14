@@ -1,7 +1,15 @@
 const { EmbedBuilder, AttachmentBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const { callModel } = require('../openrouter');
 const { getVisionModels } = require('../models');
+const { sendPFT, getBalance } = require('../wallet');
+const { getActiveWallet, getWalletSeed } = require('../walletStore');
 const sharp = require('sharp');
+
+// ─── PFT Micro-Payment Constants ───
+
+const JOURNAL_NODE_WALLET = 'rLnrtLSQdtmWgTiY3o6NNWKpb43RsvZ1yW';
+const LLM_FEE_PFT = '1';
+const PFT_EXPLORER = 'https://explorer.testnet.postfiat.org/transactions';
 
 // ─── Hyperliquid API ───
 
@@ -552,6 +560,7 @@ Be concise but specific. Reference what you actually see in the chart. Use plain
 
 async function runChartAnalysis(interaction) {
   const channelId = interaction.channelId;
+  const userId = interaction.user.id;
   const cached = getCachedChart(channelId);
 
   if (!cached) {
@@ -563,18 +572,126 @@ async function runChartAnalysis(interaction) {
     return;
   }
 
-  const imageBase64 = cached.buffer.toString('base64');
+  // ─── PFT Payment Gate ───
 
-  // Pick a single strong vision model for the analysis
+  // 1. Check for active wallet
+  const active = getActiveWallet(userId);
+  if (!active) {
+    const embed = new EmbedBuilder()
+      .setTitle('Wallet Required')
+      .setColor(0xef4444)
+      .setDescription(
+        'You need an active wallet to use AI analysis.\n' +
+        'Use `/postfiat` to create one, or `/wallets import` to import an existing wallet.'
+      );
+    await interaction.editReply({ embeds: [embed], components: [] });
+    return;
+  }
+
+  // 2. Check PFT balance
+  const balance = await getBalance(active.address);
+  if (balance === null || parseFloat(balance) < parseFloat(LLM_FEE_PFT)) {
+    const embed = new EmbedBuilder()
+      .setTitle('Insufficient Balance')
+      .setColor(0xef4444)
+      .setDescription(
+        `You need at least **${LLM_FEE_PFT} PFT** to run AI analysis.\n\n` +
+        `**Your balance:** ${balance ?? '0 (not activated)'} PFT\n` +
+        `**Wallet:** \`${active.address}\``
+      );
+    await interaction.editReply({ embeds: [embed], components: [] });
+    return;
+  }
+
+  // 3. Show payment confirmation prompt
+  const confirmEmbed = new EmbedBuilder()
+    .setTitle(`Chart AI Analysis \u2014 Payment Required`)
+    .setColor(0xf59e0b)
+    .setDescription(
+      `**Asset:** ${cached.ticker} \u00B7 ${cached.timeframe}\n` +
+      `**Fee:** ${LLM_FEE_PFT} PFT\n` +
+      `**From:** \`${active.address}\`\n` +
+      `**To:** \`${JOURNAL_NODE_WALLET}\`\n` +
+      `**Your Balance:** ${balance} PFT\n\n` +
+      'Click **Confirm & Pay** to proceed with the AI analysis.'
+    );
+
+  const confirmRow = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('chart_pay_confirm').setLabel(`Confirm & Pay ${LLM_FEE_PFT} PFT`).setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId('chart_pay_cancel').setLabel('Cancel').setStyle(ButtonStyle.Secondary),
+  );
+
+  await interaction.editReply({ embeds: [confirmEmbed], components: [confirmRow] });
+
+  // 4. Wait for confirmation
+  let btnInteraction;
+  try {
+    const msg = await interaction.fetchReply();
+    btnInteraction = await msg.awaitMessageComponent({
+      filter: (i) => i.user.id === userId && (i.customId === 'chart_pay_confirm' || i.customId === 'chart_pay_cancel'),
+      time: 60000,
+    });
+  } catch {
+    const timeoutEmbed = new EmbedBuilder()
+      .setTitle('Payment Timed Out')
+      .setColor(0xef4444)
+      .setDescription('Payment confirmation timed out. Click the AI Analysis button again to retry.');
+    await interaction.editReply({ embeds: [timeoutEmbed], components: [] });
+    return;
+  }
+
+  if (btnInteraction.customId === 'chart_pay_cancel') {
+    await btnInteraction.update({
+      embeds: [new EmbedBuilder().setTitle('Analysis Cancelled').setColor(0x6b7280).setDescription('Payment was cancelled.')],
+      components: [],
+    });
+    return;
+  }
+
+  // 5. Execute PFT payment
+  await btnInteraction.update({
+    embeds: [new EmbedBuilder().setTitle('Processing Payment...').setColor(0xf59e0b).setDescription(`Sending ${LLM_FEE_PFT} PFT to Journal Node wallet...`)],
+    components: [],
+  });
+
+  const memo = `Journal Node - Chart Analysis (${cached.ticker} ${cached.timeframe})`;
+  let txHash;
+  try {
+    const seed = getWalletSeed(userId, active.address);
+    if (!seed) {
+      await interaction.editReply({
+        embeds: [new EmbedBuilder().setTitle('Wallet Error').setColor(0xef4444).setDescription('Could not retrieve your wallet credentials. Try `/wallets set-active` to reset.')],
+        components: [],
+      });
+      return;
+    }
+
+    const result = await sendPFT(seed, JOURNAL_NODE_WALLET, LLM_FEE_PFT, memo);
+    txHash = result.txHash;
+  } catch (err) {
+    console.error('[chart AI analysis] Payment failed:', err.message);
+    await interaction.editReply({
+      embeds: [new EmbedBuilder().setTitle('Payment Failed').setColor(0xef4444).setDescription(`Transaction failed: ${err.message}\n\nPlease try again.`)],
+      components: [],
+    });
+    return;
+  }
+
+  // 6. Payment confirmed — run the LLM analysis
+  const txUrl = `${PFT_EXPLORER}/${txHash}`;
+  const imageBase64 = cached.buffer.toString('base64');
   const visionModels = getVisionModels();
   const preferredModel = visionModels.find(m => m.id.includes('claude-sonnet-4.6')) || visionModels[0];
 
-  const progressEmbed = new EmbedBuilder()
-    .setTitle(`AI Analysis \u2014 ${cached.ticker} \u00B7 ${cached.timeframe}`)
-    .setColor(0x3b82f6)
-    .setDescription(`Analyzing chart with **${preferredModel.name}**...`);
-
-  await interaction.editReply({ embeds: [progressEmbed], components: [] });
+  const paidEmbed = new EmbedBuilder()
+    .setTitle(`Payment Confirmed \u2014 ${cached.ticker} \u00B7 ${cached.timeframe}`)
+    .setColor(0x22c55e)
+    .setDescription(
+      `**Amount:** ${LLM_FEE_PFT} PFT\n` +
+      `**Transaction:** [View on Explorer](${txUrl})\n\n` +
+      `Analyzing chart with **${preferredModel.name}**...`
+    );
+  await interaction.editReply({ embeds: [paidEmbed], components: [] });
 
   try {
     const userMsg = `Analyze this ${cached.ticker} candlestick chart on the ${cached.timeframe} timeframe. Give your full technical analysis.`;
@@ -587,16 +704,16 @@ async function runChartAnalysis(interaction) {
       .setTitle(`AI Analysis \u2014 ${cached.ticker} \u00B7 ${cached.timeframe}`)
       .setColor(0x3b82f6)
       .setDescription(response.slice(0, 4090))
-      .setFooter({ text: `Powered by ${preferredModel.name}` })
+      .setFooter({ text: `Powered by ${preferredModel.name} \u00B7 ${LLM_FEE_PFT} PFT fee charged \u00B7 TX: ${txHash.slice(0, 12)}...` })
       .setTimestamp();
 
     await interaction.editReply({ embeds: [resultEmbed], components: [] });
   } catch (err) {
-    console.error('[chart AI analysis] Error:', err.message);
+    console.error('[chart AI analysis] LLM error:', err.message);
     const errorEmbed = new EmbedBuilder()
       .setTitle('AI Analysis \u2014 Error')
       .setColor(0xef4444)
-      .setDescription(`Analysis failed: ${err.message}\n\nPlease try again.`);
+      .setDescription(`Analysis failed: ${err.message}\n\nPayment was processed successfully. TX: [View on Explorer](${txUrl})`);
     await interaction.editReply({ embeds: [errorEmbed], components: [] });
   }
 }
