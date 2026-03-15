@@ -25,8 +25,10 @@ module.exports = {
   isModal: false,
 
   async execute(interaction) {
+    console.log('[/mytrades] execute() called');
     const userId = interaction.user.id;
     const openTrades = getOpenTrades(userId);
+    console.log(`[/mytrades] User ${userId} has ${openTrades.length} open trades`);
 
     if (openTrades.length === 0) {
       await interaction.editReply({
@@ -58,22 +60,24 @@ module.exports = {
       desc += `_...and ${openTrades.length - 25} more. Close some trades to see older ones._\n`;
     }
 
-    embed.setDescription(desc);
+    embed.setDescription(desc.slice(0, 4090));
 
     const rows = [];
 
     // Row 1: Chart dropdown select menu
-    const chartOptions = tradesToShow.map(trade => {
-      const dir = trade.direction?.toLowerCase() === 'long' ? 'Long' : 'Short';
+    const chartOptions = [];
+    for (const trade of tradesToShow) {
+      const dir = (trade.direction || 'long').toLowerCase() === 'long' ? 'Long' : 'Short';
       const date = new Date(trade.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-      const label = `#${trade.id} ${trade.asset} ${dir} @ ${trade.entry}`.slice(0, 100);
-      const description = `${trade.timeframe || 'N/A'}, opened ${date}`.slice(0, 100);
-      return { label, value: trade.tradeId, description };
-    });
+      const label = `#${trade.id} ${trade.asset || '???'} ${dir} @ ${trade.entry || '?'}`.slice(0, 100);
+      const optDesc = `${trade.timeframe || 'N/A'}, opened ${date}`.slice(0, 100);
+      chartOptions.push({ label, value: trade.tradeId, description: optDesc });
+    }
+    console.log('[/mytrades] chartOptions count:', chartOptions.length, 'first:', JSON.stringify(chartOptions[0]));
 
     const chartSelect = new StringSelectMenuBuilder()
       .setCustomId('mytrades_chart_select')
-      .setPlaceholder('📊 Select a trade to view chart...')
+      .setPlaceholder('Select a trade to view chart...')
       .addOptions(chartOptions);
 
     rows.push(new ActionRowBuilder().addComponents(chartSelect));
