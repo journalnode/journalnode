@@ -212,6 +212,15 @@ module.exports = {
       // Cache chart for AI analysis button
       chartCmd.cacheChart(interaction.channelId, buffer, displayName, tfObj.label);
 
+      // Add Close Trade button beside AI Analysis button
+      row.addComponents(
+        new ButtonBuilder()
+          .setCustomId(`close_trade_${trade.tradeId}`)
+          .setLabel(`Close Trade #${trade.id}`)
+          .setStyle(ButtonStyle.Danger)
+          .setEmoji('🔒'),
+      );
+
       // Add trade context to embed description
       const dirEmoji = trade.direction?.toLowerCase() === 'long' ? '📈' : '📉';
       let tradeContext = `\n\n${dirEmoji} **Active Trade #${trade.id}** — ${trade.direction} @ $${trade.entry}`;
