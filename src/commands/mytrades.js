@@ -64,16 +64,11 @@ module.exports = {
 
     // Row 1: Chart dropdown select menu
     const chartOptions = tradesToShow.map(trade => {
-      const dirEmoji = trade.direction?.toLowerCase() === 'long' ? '📈' : '📉';
+      const dir = trade.direction?.toLowerCase() === 'long' ? 'Long' : 'Short';
       const date = new Date(trade.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-      const label = `#${trade.id} ${trade.asset} — ${trade.direction} @ ${trade.entry}`.slice(0, 100);
-      const description = `${trade.timeframe}, opened ${date}`.slice(0, 100);
-      return {
-        label,
-        value: trade.tradeId,
-        description,
-        emoji: dirEmoji === '📈' ? '📈' : '📉',
-      };
+      const label = `#${trade.id} ${trade.asset} ${dir} @ ${trade.entry}`.slice(0, 100);
+      const description = `${trade.timeframe || 'N/A'}, opened ${date}`.slice(0, 100);
+      return { label, value: trade.tradeId, description };
     });
 
     const chartSelect = new StringSelectMenuBuilder()
