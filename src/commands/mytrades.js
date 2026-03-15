@@ -67,26 +67,30 @@ module.exports = {
     // Row 1: Chart dropdown select menu
     const chartOptions = [];
     for (const trade of tradesToShow) {
+      // Skip trades without a tradeId (legacy data)
+      if (!trade.tradeId) continue;
       const dir = (trade.direction || 'long').toLowerCase() === 'long' ? 'Long' : 'Short';
       const date = new Date(trade.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
       const label = `#${trade.id} ${trade.asset || '???'} ${dir} @ ${trade.entry || '?'}`.slice(0, 100);
       const optDesc = `${trade.timeframe || 'N/A'}, opened ${date}`.slice(0, 100);
       chartOptions.push({ label, value: trade.tradeId, description: optDesc });
     }
-    console.log('[/mytrades] chartOptions count:', chartOptions.length, 'first:', JSON.stringify(chartOptions[0]));
 
-    const chartSelect = new StringSelectMenuBuilder()
-      .setCustomId('mytrades_chart_select')
-      .setPlaceholder('Select a trade to view chart...')
-      .addOptions(chartOptions);
+    if (chartOptions.length > 0) {
+      const chartSelect = new StringSelectMenuBuilder()
+        .setCustomId('mytrades_chart_select')
+        .setPlaceholder('Select a trade to view chart...')
+        .addOptions(chartOptions);
 
-    rows.push(new ActionRowBuilder().addComponents(chartSelect));
+      rows.push(new ActionRowBuilder().addComponents(chartSelect));
+    }
 
     // Remaining rows: Close buttons (up to 4 rows × 5 buttons = 20 trades)
-    const closeTradesMax = tradesToShow.slice(0, 20);
-    for (let i = 0; i < closeTradesMax.length && rows.length < 5; i += 5) {
+    // Only include trades that have a tradeId
+    const closeTrades = tradesToShow.filter(t => t.tradeId).slice(0, 20);
+    for (let i = 0; i < closeTrades.length && rows.length < 5; i += 5) {
       const row = new ActionRowBuilder();
-      const chunk = closeTradesMax.slice(i, i + 5);
+      const chunk = closeTrades.slice(i, i + 5);
       for (const trade of chunk) {
         row.addComponents(
           new ButtonBuilder()
