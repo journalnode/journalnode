@@ -279,6 +279,7 @@ function buildCandlestickSvg(candles, coin, interval, label, opts = {}) {
   const showSwings = opts.showSwings || false;
   const markerData = opts.marker || null; // { type, timestamp, tweetUrl?, tweetAuthor? }
   const entryPrice = opts.entryPrice ? parseFloat(opts.entryPrice) : null; // horizontal entry-price line
+  const entryTimestamp = opts.entryTimestamp || null; // ms timestamp for entry dot position
   const W = 900;
   const CHART_H = 500;
   const PAD_TOP = 50, PAD_BOTTOM = 60, PAD_LEFT = 20, PAD_RIGHT = 90;
@@ -474,6 +475,20 @@ function buildCandlestickSvg(candles, coin, interval, label, opts = {}) {
       const entryLabelW = entryLabelText.length * 6.5 + 10;
       svgParts.push(`<rect x="${W - PAD_RIGHT + 2}" y="${entryY - 8}" width="${entryLabelW}" height="16" rx="3" fill="${ENTRY_COLOR}" opacity="0.9"/>`);
       svgParts.push(`<text x="${W - PAD_RIGHT + 2 + entryLabelW / 2}" y="${entryY + 4}" text-anchor="middle" fill="${BG}" font-family="Arial,sans-serif" font-size="10" font-weight="bold">${escapeXml(entryLabelText)}</text>`);
+
+      // Entry dot at exact timestamp position (when timeframe is wide enough)
+      if (entryTimestamp) {
+        const entryIdx = findMarkerCandleIndex(parsed, entryTimestamp);
+        const entryDotX = indexToX(entryIdx);
+        // Dot at entry price/time intersection
+        svgParts.push(`<circle cx="${entryDotX}" cy="${entryY}" r="6" fill="${ENTRY_COLOR}" stroke="${BG}" stroke-width="2"/>`);
+        // Vertical dashed line at entry time
+        svgParts.push(`<line x1="${entryDotX}" y1="${PAD_TOP}" x2="${entryDotX}" y2="${CHART_H - PAD_BOTTOM}" stroke="${ENTRY_COLOR}" stroke-width="1" stroke-dasharray="4,3" opacity="0.35"/>`);
+        // "Entry" label below the dot
+        const entryDateStr = formatDateLabel(parsed[entryIdx].t, interval);
+        svgParts.push(`<rect x="${entryDotX - 30}" y="${CHART_H - PAD_BOTTOM + 32}" width="60" height="14" rx="2" fill="${BG}" opacity="0.9"/>`);
+        svgParts.push(`<text x="${entryDotX}" y="${CHART_H - PAD_BOTTOM + 43}" text-anchor="middle" fill="${ENTRY_COLOR}" font-family="Arial,sans-serif" font-size="9" font-weight="bold">ENTRY</text>`);
+      }
     }
 
     // Percent-change badge from entry to current price (top-right area)
@@ -889,4 +904,5 @@ module.exports = {
 
   getCachedChart,
   cacheChart,
+  INTERVAL_MS,
 };

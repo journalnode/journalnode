@@ -458,18 +458,6 @@ client.on('interactionCreate', async (interaction) => {
           await interaction.reply({ content: errorMsg, flags: 64 }).catch(() => {});
         }
       }
-    } else if (interaction.customId.startsWith('view_chart_')) {
-      try {
-        await mytradesCmd.handleChartButton(interaction);
-      } catch (err) {
-        console.error('[/mytrades] View chart button failed:', err);
-        const errorMsg = 'Something went wrong loading the chart. Please try again.';
-        if (interaction.deferred || interaction.replied) {
-          await interaction.followUp({ content: errorMsg, flags: 64 }).catch(() => {});
-        } else {
-          await interaction.reply({ content: errorMsg, flags: 64 }).catch(() => {});
-        }
-      }
     } else if (interaction.customId.startsWith('close_trade_')) {
       try {
         await mytradesCmd.handleCloseButton(interaction);
@@ -602,6 +590,30 @@ client.on('interactionCreate', async (interaction) => {
       } catch (err) {
         console.error('[/watchlist] Select menu failed:', err);
         const errorMsg = 'Something went wrong. Please try `/watchlist view` again.';
+        if (interaction.deferred || interaction.replied) {
+          await interaction.followUp({ content: errorMsg, flags: 64 }).catch(() => {});
+        } else {
+          await interaction.reply({ content: errorMsg, flags: 64 }).catch(() => {});
+        }
+      }
+    } else if (interaction.customId === 'mytrades_chart_select') {
+      try {
+        await mytradesCmd.handleChartSelect(interaction);
+      } catch (err) {
+        console.error('[/mytrades] Chart select menu failed:', err);
+        const errorMsg = 'Something went wrong. Please try `/mytrades` again.';
+        if (interaction.deferred || interaction.replied) {
+          await interaction.followUp({ content: errorMsg, flags: 64 }).catch(() => {});
+        } else {
+          await interaction.reply({ content: errorMsg, flags: 64 }).catch(() => {});
+        }
+      }
+    } else if (interaction.customId === 'mytrades_tf_select') {
+      try {
+        await mytradesCmd.handleTimeframeSelect(interaction);
+      } catch (err) {
+        console.error('[/mytrades] Timeframe select failed:', err);
+        const errorMsg = 'Something went wrong loading the chart. Please try again.';
         if (interaction.deferred || interaction.replied) {
           await interaction.followUp({ content: errorMsg, flags: 64 }).catch(() => {});
         } else {
