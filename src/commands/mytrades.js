@@ -52,7 +52,8 @@ module.exports = {
     for (const trade of tradesToShow) {
       const dirEmoji = trade.direction?.toLowerCase() === 'long' ? '📈' : '📉';
       const date = new Date(trade.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-      desc += `**#${trade.id}** ${dirEmoji} **${trade.asset}** — ${trade.direction} @ ${trade.entry} → ${trade.target} _(${trade.timeframe}, ${date})_\n`;
+      const walletTag = trade.walletLabel ? ` 🏷️ ${trade.walletLabel}` : '';
+      desc += `**#${trade.id}** ${dirEmoji} **${trade.asset}** — ${trade.direction} @ ${trade.entry} → ${trade.target} _(${trade.timeframe}, ${date})_${walletTag}\n`;
       desc += `\`ID: ${trade.tradeId}\`\n\n`;
     }
 
@@ -361,6 +362,9 @@ module.exports = {
     let desc = '';
     desc += `**Trade ID:** \`${closed.tradeId}\`\n`;
     desc += `**Trader:** ${username}\n`;
+    if (closed.walletLabel) {
+      desc += `**Wallet:** 🏷️ ${closed.walletLabel}\n`;
+    }
     desc += `**Asset:** ${closed.asset}\n`;
     desc += `**Direction:** ${dirEmoji} ${closed.direction.toUpperCase()}\n`;
     desc += `**Entry:** ${closed.entry}\n`;

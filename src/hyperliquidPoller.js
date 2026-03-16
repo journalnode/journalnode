@@ -5,8 +5,8 @@ const { addTrade, getOpenTrades, closeTrade } = require('./tradeStore');
 const HL_API = 'https://api.hyperliquid.xyz/info';
 const POLL_INTERVAL_MS = 30_000; // 30 seconds
 
-// In-memory cache of known positions per user to detect new ones and closes
-// Structure: { [userId]: { [coin_direction]: { szi, entryPx } } }
+// In-memory cache of known positions per wallet to detect new ones and closes
+// Structure: { [userId_walletId]: { [coin_direction]: { szi, entryPx } } }
 const knownPositions = new Map();
 
 /**
@@ -105,12 +105,19 @@ function positionKey(position) {
 }
 
 /**
+ * Build the cache key for a user+wallet combination.
+ */
+function cacheKey(userId, walletId) {
+  return `${userId}_${walletId}`;
+}
+
+/**
  * Detect closed positions by comparing current positions with known ones.
  * A position is "closed" if it was in the known cache but is no longer in current positions.
  * Must be called BEFORE detectNewPositions (which updates the cache).
  */
-function detectClosedPositions(userId, currentPositions) {
-  const known = knownPositions.get(userId) || {};
+function detectClosedPositions(cacheId, currentPositions) {
+  const known = knownPositions.get(cacheId) || {};
   const currentKeys = new Set(currentPositions.map(pos => positionKey(pos)));
   const closedPositions = [];
 
@@ -129,8 +136,8 @@ function detectClosedPositions(userId, currentPositions) {
  * A position is "new" if we haven't seen that coin+direction combination before.
  * Also updates the known positions cache.
  */
-function detectNewPositions(userId, currentPositions) {
-  const known = knownPositions.get(userId) || {};
+function detectNewPositions(cacheId, currentPositions) {
+  const known = knownPositions.get(cacheId) || {};
   const newPositions = [];
 
   for (const pos of currentPositions) {
@@ -149,15 +156,15 @@ function detectNewPositions(userId, currentPositions) {
       entryPx: pos.entryPx,
     };
   }
-  knownPositions.set(userId, updated);
+  knownPositions.set(cacheId, updated);
 
   return newPositions;
 }
 
 /**
- * Initialize known positions for a user (so we don't alert on existing positions at startup).
+ * Initialize known positions for a wallet (so we don't alert on existing positions at startup).
  */
-async function initializeUserPositions(userId, walletAddress) {
+async function initializeUserPositions(cacheId, walletAddress) {
   const positions = await fetchPositions(walletAddress);
   const known = {};
   for (const pos of positions) {
@@ -167,14 +174,15 @@ async function initializeUserPositions(userId, walletAddress) {
       entryPx: pos.entryPx,
     };
   }
-  knownPositions.set(userId, known);
+  knownPositions.set(cacheId, known);
   return positions.length;
 }
 
 /**
  * Build a Discord embed for a new Hyperliquid position.
+ * Includes wallet label to distinguish which account the trade came from.
  */
-function buildPositionEmbed(position, username) {
+function buildPositionEmbed(position, username, walletLabel) {
   const size = parseFloat(position.szi);
   const direction = size > 0 ? 'Long' : 'Short';
   const dirEmoji = direction === 'Long' ? '📈' : '📉';
@@ -196,6 +204,7 @@ function buildPositionEmbed(position, username) {
 
   let desc = '';
   desc += `**Trader:** ${username}\n`;
+  desc += `**Wallet:** 🏷️ ${walletLabel}\n`;
   desc += `**Asset:** ${position.coin}\n`;
   desc += `**Direction:** ${dirEmoji} ${direction.toUpperCase()}\n`;
   desc += `**Size:** ${absSize} ${position.coin}\n`;
@@ -211,8 +220,9 @@ function buildPositionEmbed(position, username) {
 
 /**
  * Build a Discord embed for a closed Hyperliquid position.
+ * Includes wallet label for multi-wallet identification.
  */
-function buildCloseEmbed(closedPos, exitPrice, trade, username) {
+function buildCloseEmbed(closedPos, exitPrice, trade, username, walletLabel) {
   const { coin, direction, szi, entryPx } = closedPos;
   const entry = parseFloat(entryPx);
   const exit = exitPrice ? parseFloat(exitPrice) : null;
@@ -253,6 +263,7 @@ function buildCloseEmbed(closedPos, exitPrice, trade, username) {
 
   let desc = '';
   desc += `**Trader:** ${username}\n`;
+  desc += `**Wallet:** 🏷️ ${walletLabel}\n`;
   desc += `**Asset:** ${coin}\n`;
   desc += `**Direction:** ${dirEmoji} ${direction.toUpperCase()}\n`;
   desc += `**Size:** ${absSize} ${coin}\n`;
@@ -316,9 +327,21 @@ function formatDuration(ms) {
 
 /**
  * Find the matching open trade ticket for a closed Hyperliquid position.
+ * Matches on wallet ID if available, otherwise falls back to coin+direction.
  */
-function findMatchingTrade(userId, coin, direction) {
+function findMatchingTrade(userId, coin, direction, walletId) {
   const openTrades = getOpenTrades(userId);
+  // Prefer matching by walletId for multi-wallet accuracy
+  if (walletId) {
+    const match = openTrades.find(t =>
+      t.source === 'hyperliquid' &&
+      t.asset === coin &&
+      t.direction === direction &&
+      t.walletId === walletId
+    );
+    if (match) return match;
+  }
+  // Fallback: match without walletId (legacy trades)
   return openTrades.find(t =>
     t.source === 'hyperliquid' &&
     t.asset === coin &&
@@ -343,8 +366,9 @@ function autoCloseTradeTicket(userId, tradeId, exitPrice, pnl, pnlPercent, isWin
 
 /**
  * Create a trade ticket from a Hyperliquid position.
+ * Includes walletLabel and walletId for multi-wallet identification.
  */
-function createTradeTicket(userId, position, username) {
+function createTradeTicket(userId, position, username, walletLabel, walletId) {
   const size = parseFloat(position.szi);
   const direction = size > 0 ? 'Long' : 'Short';
   const absSize = Math.abs(size);
@@ -358,11 +382,13 @@ function createTradeTicket(userId, position, username) {
     target: 'N/A (Hyperliquid)',
     stopLoss: position.liquidationPx || null,
     timeframe: 'Live',
-    emotionReasoning: `Auto-detected from Hyperliquid — ${absSize} ${position.coin} @ ${leverage}x leverage`,
+    emotionReasoning: `Auto-detected from Hyperliquid [${walletLabel}] — ${absSize} ${position.coin} @ ${leverage}x leverage`,
     screenshotUrl: null,
     username,
     status: 'open',
     source: 'hyperliquid',
+    walletLabel,
+    walletId,
   });
 
   return trade;
@@ -370,13 +396,15 @@ function createTradeTicket(userId, position, username) {
 
 /**
  * Check if a Hyperliquid position already has an open trade ticket to avoid duplicates.
+ * Checks per walletId for multi-wallet accuracy.
  */
-function hasExistingTicket(userId, coin, direction) {
+function hasExistingTicket(userId, coin, direction, walletId) {
   const openTrades = getOpenTrades(userId);
   return openTrades.some(t =>
     t.source === 'hyperliquid' &&
     t.asset === coin &&
-    t.direction === direction
+    t.direction === direction &&
+    (walletId ? t.walletId === walletId : true)
   );
 }
 
@@ -390,9 +418,10 @@ function startPoller(client) {
   // Initial snapshot of all linked wallets
   (async () => {
     const wallets = getAllLinkedWallets();
-    for (const { userId, wallet } of wallets) {
-      const count = await initializeUserPositions(userId, wallet);
-      console.log(`[HL Poller] Initialized ${count} existing positions for user ${userId}`);
+    for (const { userId, id: walletId, wallet, label } of wallets) {
+      const ck = cacheKey(userId, walletId);
+      const count = await initializeUserPositions(ck, wallet);
+      console.log(`[HL Poller] Initialized ${count} existing positions for user ${userId} wallet "${label}"`);
     }
   })();
 
@@ -400,15 +429,16 @@ function startPoller(client) {
     const wallets = getAllLinkedWallets();
     if (wallets.length === 0) return;
 
-    for (const { userId, wallet, channelId } of wallets) {
+    for (const { userId, id: walletId, wallet, label: walletLabel, channelId } of wallets) {
       try {
+        const ck = cacheKey(userId, walletId);
         const positions = await fetchPositions(wallet);
 
         // Detect closed positions BEFORE updating the cache
-        const closedPositions = detectClosedPositions(userId, positions);
+        const closedPositions = detectClosedPositions(ck, positions);
 
         // Detect new positions (this also updates the cache)
-        const newPositions = detectNewPositions(userId, positions);
+        const newPositions = detectNewPositions(ck, positions);
 
         const hasActivity = newPositions.length > 0 || closedPositions.length > 0;
         if (!hasActivity) continue;
@@ -437,21 +467,21 @@ function startPoller(client) {
           const fills = await fetchRecentFills(wallet);
 
           for (const closedPos of closedPositions) {
-            console.log(`[HL Poller] Position closed: ${username} ${closedPos.direction} ${closedPos.coin}`);
+            console.log(`[HL Poller] Position closed: ${username} [${walletLabel}] ${closedPos.direction} ${closedPos.coin}`);
 
             // Get exit price from recent fills
             const exitPrice = getExitPriceFromFills(fills, closedPos.coin);
 
             // Find matching open trade ticket
-            const trade = findMatchingTrade(userId, closedPos.coin, closedPos.direction);
+            const trade = findMatchingTrade(userId, closedPos.coin, closedPos.direction, walletId);
 
-            // Build close notification embed
-            const { embed, pnl, pnlPercent, isWin } = buildCloseEmbed(closedPos, exitPrice, trade, username);
+            // Build close notification embed with wallet label
+            const { embed, pnl, pnlPercent, isWin } = buildCloseEmbed(closedPos, exitPrice, trade, username, walletLabel);
 
             // Auto-close the trade ticket if found
             if (trade) {
               autoCloseTradeTicket(userId, trade.tradeId, exitPrice, pnl, pnlPercent, isWin);
-              console.log(`[HL Poller] Auto-closed trade ticket #${trade.id} for ${closedPos.coin} ${closedPos.direction}`);
+              console.log(`[HL Poller] Auto-closed trade ticket #${trade.id} for ${closedPos.coin} ${closedPos.direction} [${walletLabel}]`);
             }
 
             try {
@@ -462,27 +492,27 @@ function startPoller(client) {
           }
         }
 
-        // Handle new positions (existing logic)
+        // Handle new positions
         for (const pos of newPositions) {
           const size = parseFloat(pos.szi);
           const direction = size > 0 ? 'Long' : 'Short';
 
-          // Skip if there's already an open trade ticket for this exact position
-          if (hasExistingTicket(userId, pos.coin, direction)) {
-            console.log(`[HL Poller] Skipping duplicate ticket for ${pos.coin} ${direction} (user ${userId})`);
+          // Skip if there's already an open trade ticket for this exact position on this wallet
+          if (hasExistingTicket(userId, pos.coin, direction, walletId)) {
+            console.log(`[HL Poller] Skipping duplicate ticket for ${pos.coin} ${direction} [${walletLabel}] (user ${userId})`);
             continue;
           }
 
-          console.log(`[HL Poller] New position detected: ${username} ${direction} ${pos.coin} @ ${pos.entryPx}`);
+          console.log(`[HL Poller] New position detected: ${username} [${walletLabel}] ${direction} ${pos.coin} @ ${pos.entryPx}`);
 
-          // Build and post the embed
-          const embed = buildPositionEmbed(pos, username);
+          // Build and post the embed with wallet label
+          const embed = buildPositionEmbed(pos, username, walletLabel);
 
-          // Create trade ticket
-          const trade = createTradeTicket(userId, pos, username);
+          // Create trade ticket with wallet info
+          const trade = createTradeTicket(userId, pos, username, walletLabel, walletId);
 
           // Add trade ticket reference to embed
-          embed.setFooter({ text: `Trade Ticket #${trade.id} • ID: ${trade.tradeId}` });
+          embed.setFooter({ text: `Trade Ticket #${trade.id} • ID: ${trade.tradeId} • 🏷️ ${walletLabel}` });
 
           // Add LLM Analysis button
           const row = new ActionRowBuilder().addComponents(
@@ -504,7 +534,7 @@ function startPoller(client) {
           }
         }
       } catch (err) {
-        console.error(`[HL Poller] Error polling user ${userId}:`, err.message);
+        console.error(`[HL Poller] Error polling user ${userId} wallet "${walletLabel}":`, err.message);
       }
     }
   }, POLL_INTERVAL_MS);

@@ -352,23 +352,37 @@ const statsBuilder = new SlashCommandBuilder()
   .setDescription(statsCmd.description);
 slashCommands.push(statsBuilder.toJSON());
 
-// /hyperliquid: connect, disconnect, status subcommands
+// /hyperliquid: multi-wallet management subcommands
 const hyperliquidBuilder = new SlashCommandBuilder()
   .setName('hyperliquid')
   .setDescription(hyperliquidCmd.description)
   .addSubcommand(sub => sub
-    .setName('connect')
-    .setDescription('Link your Hyperliquid wallet address for automatic trade tracking.')
+    .setName('add')
+    .setDescription('Add a Hyperliquid wallet with a custom label for trade tracking.')
     .addStringOption(opt => opt
       .setName('wallet')
       .setDescription('Your Hyperliquid wallet address (0x...)')
+      .setRequired(true))
+    .addStringOption(opt => opt
+      .setName('label')
+      .setDescription('A label for this wallet (e.g. "Main", "Degen", "Sniper")')
+      .setRequired(false)))
+  .addSubcommand(sub => sub
+    .setName('remove')
+    .setDescription('Remove a connected Hyperliquid wallet.'))
+  .addSubcommand(sub => sub
+    .setName('rename')
+    .setDescription('Rename the label on a connected wallet.')
+    .addStringOption(opt => opt
+      .setName('label')
+      .setDescription('The new label for the wallet')
       .setRequired(true)))
   .addSubcommand(sub => sub
-    .setName('disconnect')
-    .setDescription('Unlink your Hyperliquid wallet and stop monitoring.'))
+    .setName('wallets')
+    .setDescription('View all your connected Hyperliquid wallets.'))
   .addSubcommand(sub => sub
     .setName('status')
-    .setDescription('View your linked wallet and current Hyperliquid positions.'));
+    .setDescription('View wallet positions and integration status.'));
 slashCommands.push(hyperliquidBuilder.toJSON());
 
 // --- Dynamic self-awareness: build a live system prompt from the command registry ---
@@ -627,6 +641,18 @@ client.on('interactionCreate', async (interaction) => {
       } catch (err) {
         console.error('[/mytrades] Chart select menu failed:', err);
         const errorMsg = 'Something went wrong. Please try `/mytrades` again.';
+        if (interaction.deferred || interaction.replied) {
+          await interaction.followUp({ content: errorMsg, flags: 64 }).catch(() => {});
+        } else {
+          await interaction.reply({ content: errorMsg, flags: 64 }).catch(() => {});
+        }
+      }
+    } else if (interaction.customId === 'hl_remove_wallet' || interaction.customId === 'hl_rename_wallet') {
+      try {
+        await hyperliquidCmd.handleWalletSelect(interaction);
+      } catch (err) {
+        console.error('[/hyperliquid] Wallet select failed:', err);
+        const errorMsg = 'Something went wrong. Please try again.';
         if (interaction.deferred || interaction.replied) {
           await interaction.followUp({ content: errorMsg, flags: 64 }).catch(() => {});
         } else {
