@@ -55,6 +55,8 @@ const watchlistCmd = require('./commands/watchlist');
 commands.set(watchlistCmd.name, watchlistCmd);
 const statsCmd = require('./commands/stats');
 commands.set(statsCmd.name, statsCmd);
+const hyperliquidCmd = require('./commands/hyperliquid');
+commands.set(hyperliquidCmd.name, hyperliquidCmd);
 
 const { chat: llmChat } = require('./openrouter');
 const { formatEntries, summarizeStats, sendLong } = require('./commands/helpers');
@@ -62,6 +64,7 @@ const { getUserPurpose } = require('./onboardStore');
 const { buildCapabilities } = require('./capabilities');
 const { findLatestBobThesis } = require('./bobDetect');
 const { getWatchlist } = require('./watchlistStore');
+const { startPoller: startHyperliquidPoller } = require('./hyperliquidPoller');
 
 // Build slash command definitions
 function addTimeframeOption(builder) {
@@ -349,6 +352,25 @@ const statsBuilder = new SlashCommandBuilder()
   .setDescription(statsCmd.description);
 slashCommands.push(statsBuilder.toJSON());
 
+// /hyperliquid: connect, disconnect, status subcommands
+const hyperliquidBuilder = new SlashCommandBuilder()
+  .setName('hyperliquid')
+  .setDescription(hyperliquidCmd.description)
+  .addSubcommand(sub => sub
+    .setName('connect')
+    .setDescription('Link your Hyperliquid wallet address for automatic trade tracking.')
+    .addStringOption(opt => opt
+      .setName('wallet')
+      .setDescription('Your Hyperliquid wallet address (0x...)')
+      .setRequired(true)))
+  .addSubcommand(sub => sub
+    .setName('disconnect')
+    .setDescription('Unlink your Hyperliquid wallet and stop monitoring.'))
+  .addSubcommand(sub => sub
+    .setName('status')
+    .setDescription('View your linked wallet and current Hyperliquid positions.'));
+slashCommands.push(hyperliquidBuilder.toJSON());
+
 // --- Dynamic self-awareness: build a live system prompt from the command registry ---
 const capabilitiesBlock = buildCapabilities(slashCommands);
 const dynamicSystemPrompt = chatCmd.buildSystemPrompt(capabilitiesBlock);
@@ -370,11 +392,14 @@ client.once('clientReady', async () => {
   try {
     console.log('Registering slash commands...');
     await rest.put(Routes.applicationCommands(client.user.id), { body: slashCommands });
-    const allNames = ['chat', 'postfiat', 'wallets', 'send', 'balance', 'mint', 'gallery', 'receive', 'onboard', 'trade', 'mytrades', 'menu', 'llmanalyze', 'faq', 'tradehistory', 'chart', 'sendnft', 'thesis', 'compare', 'watchlist', 'stats'].map(c => `/${c}`).join(', ');
+    const allNames = ['chat', 'postfiat', 'wallets', 'send', 'balance', 'mint', 'gallery', 'receive', 'onboard', 'trade', 'mytrades', 'menu', 'llmanalyze', 'faq', 'tradehistory', 'chart', 'sendnft', 'thesis', 'compare', 'watchlist', 'stats', 'hyperliquid'].map(c => `/${c}`).join(', ');
     console.log(`Registered ${slashCommands.length} slash commands: ${allNames}`);
   } catch (err) {
     console.error('Failed to register slash commands:', err);
   }
+
+  // Start Hyperliquid position poller
+  startHyperliquidPoller(client);
 });
 
 client.on('interactionCreate', async (interaction) => {
