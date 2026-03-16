@@ -66,6 +66,10 @@ function closeTrade(userId, tradeId, closeData) {
   trade.closeScreenshotUrl = closeData.closeScreenshotUrl || null;
   trade.closedAt = new Date().toISOString();
 
+  // Optional P&L fields (populated by auto-close from Hyperliquid)
+  if (closeData.pnl !== undefined) trade.pnl = closeData.pnl;
+  if (closeData.pnlPercent !== undefined) trade.pnlPercent = closeData.pnlPercent;
+
   saveStore(store);
   return trade;
 }

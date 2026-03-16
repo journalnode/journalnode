@@ -1,11 +1,11 @@
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const { getAllLinkedWallets } = require('./hyperliquidStore');
-const { addTrade, getOpenTrades } = require('./tradeStore');
+const { addTrade, getOpenTrades, closeTrade } = require('./tradeStore');
 
 const HL_API = 'https://api.hyperliquid.xyz/info';
 const POLL_INTERVAL_MS = 30_000; // 30 seconds
 
-// In-memory cache of known positions per user to detect new ones
+// In-memory cache of known positions per user to detect new ones and closes
 // Structure: { [userId]: { [coin_direction]: { szi, entryPx } } }
 const knownPositions = new Map();
 
@@ -42,6 +42,61 @@ async function fetchPositions(walletAddress) {
 }
 
 /**
+ * Fetch recent trade fills for a wallet from Hyperliquid.
+ * Used to determine exit price when a position is closed.
+ */
+async function fetchRecentFills(walletAddress) {
+  try {
+    const res = await fetch(HL_API, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: 'userFills',
+        user: walletAddress,
+      }),
+    });
+
+    if (!res.ok) {
+      console.error(`[HL Poller] Fills API error ${res.status} for ${walletAddress}`);
+      return [];
+    }
+
+    return await res.json();
+  } catch (err) {
+    console.error(`[HL Poller] Fetch fills error for ${walletAddress}:`, err.message);
+    return [];
+  }
+}
+
+/**
+ * Get the exit price from recent fills for a closed position.
+ * Looks for the most recent fill matching the coin within the last 2 minutes.
+ */
+function getExitPriceFromFills(fills, coin) {
+  const now = Date.now();
+  const lookbackMs = 2 * 60 * 1000; // 2 minutes
+
+  // Filter fills for this coin within the lookback window, sorted newest first
+  const relevant = fills
+    .filter(f => f.coin === coin && (now - f.time) < lookbackMs)
+    .sort((a, b) => b.time - a.time);
+
+  if (relevant.length === 0) return null;
+
+  // If multiple fills closed the position, compute volume-weighted average price
+  let totalValue = 0;
+  let totalSize = 0;
+  for (const fill of relevant) {
+    const px = parseFloat(fill.px);
+    const sz = parseFloat(fill.sz);
+    totalValue += px * sz;
+    totalSize += sz;
+  }
+
+  return totalSize > 0 ? (totalValue / totalSize) : parseFloat(relevant[0].px);
+}
+
+/**
  * Build a unique key for a position to track it.
  */
 function positionKey(position) {
@@ -50,8 +105,29 @@ function positionKey(position) {
 }
 
 /**
+ * Detect closed positions by comparing current positions with known ones.
+ * A position is "closed" if it was in the known cache but is no longer in current positions.
+ * Must be called BEFORE detectNewPositions (which updates the cache).
+ */
+function detectClosedPositions(userId, currentPositions) {
+  const known = knownPositions.get(userId) || {};
+  const currentKeys = new Set(currentPositions.map(pos => positionKey(pos)));
+  const closedPositions = [];
+
+  for (const [key, data] of Object.entries(known)) {
+    if (!currentKeys.has(key)) {
+      const [coin, direction] = key.split('_');
+      closedPositions.push({ coin, direction, ...data });
+    }
+  }
+
+  return closedPositions;
+}
+
+/**
  * Detect new positions by comparing current positions with known ones.
  * A position is "new" if we haven't seen that coin+direction combination before.
+ * Also updates the known positions cache.
  */
 function detectNewPositions(userId, currentPositions) {
   const known = knownPositions.get(userId) || {};
@@ -134,6 +210,138 @@ function buildPositionEmbed(position, username) {
 }
 
 /**
+ * Build a Discord embed for a closed Hyperliquid position.
+ */
+function buildCloseEmbed(closedPos, exitPrice, trade, username) {
+  const { coin, direction, szi, entryPx } = closedPos;
+  const entry = parseFloat(entryPx);
+  const exit = exitPrice ? parseFloat(exitPrice) : null;
+  const absSize = Math.abs(parseFloat(szi));
+  const dirEmoji = direction === 'Long' ? '📈' : '📉';
+
+  // Calculate P&L
+  let pnl = null;
+  let pnlPercent = null;
+  let isWin = null;
+  if (exit !== null && entry > 0) {
+    if (direction === 'Long') {
+      pnl = (exit - entry) * absSize;
+      pnlPercent = ((exit - entry) / entry) * 100;
+    } else {
+      pnl = (entry - exit) * absSize;
+      pnlPercent = ((entry - exit) / entry) * 100;
+    }
+    isWin = pnl >= 0;
+  }
+
+  // Calculate trade duration
+  let durationStr = 'Unknown';
+  if (trade && trade.createdAt) {
+    const openTime = new Date(trade.createdAt).getTime();
+    const closeTime = Date.now();
+    const durationMs = closeTime - openTime;
+    durationStr = formatDuration(durationMs);
+  }
+
+  const outcomeEmoji = isWin === null ? '🔒' : (isWin ? '✅' : '❌');
+  const outcomeText = isWin === null ? 'CLOSED' : (isWin ? 'WIN' : 'LOSS');
+
+  const embed = new EmbedBuilder()
+    .setTitle(`🔒 HYPERLIQUID — ${coin} ${direction.toUpperCase()} CLOSED ${outcomeEmoji}`)
+    .setColor(isWin === null ? 0x6b7280 : (isWin ? 0x22c55e : 0xef4444))
+    .setTimestamp();
+
+  let desc = '';
+  desc += `**Trader:** ${username}\n`;
+  desc += `**Asset:** ${coin}\n`;
+  desc += `**Direction:** ${dirEmoji} ${direction.toUpperCase()}\n`;
+  desc += `**Size:** ${absSize} ${coin}\n`;
+  desc += `**Entry Price:** $${entry.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 })}\n`;
+
+  if (exit !== null) {
+    desc += `**Exit Price:** $${exit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 })}\n`;
+  } else {
+    desc += `**Exit Price:** _Unavailable_\n`;
+  }
+
+  desc += '\n';
+
+  if (pnl !== null) {
+    const pnlSign = pnl >= 0 ? '+' : '';
+    const pnlEmoji = pnl >= 0 ? '🟢' : '🔴';
+    desc += `**Realized P&L:** ${pnlEmoji} ${pnlSign}$${pnl.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (${pnlSign}${pnlPercent.toFixed(2)}%)\n`;
+    desc += `**Outcome:** ${outcomeEmoji} **${outcomeText}**\n`;
+  }
+
+  desc += `**Duration:** ${durationStr}\n`;
+
+  if (trade) {
+    desc += `\n**Opened:** ${new Date(trade.createdAt).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })}\n`;
+    desc += `**Closed:** ${new Date().toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })}\n`;
+  }
+
+  desc += `\n_Auto-closed via Hyperliquid integration_`;
+
+  embed.setDescription(desc);
+
+  if (trade) {
+    embed.setFooter({ text: `Trade Ticket #${trade.id} • ID: ${trade.tradeId}` });
+  }
+
+  return { embed, pnl, pnlPercent, isWin };
+}
+
+/**
+ * Format a duration in milliseconds to a human-readable string.
+ */
+function formatDuration(ms) {
+  const seconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(seconds / 60);
+  const hours = Math.floor(minutes / 60);
+  const days = Math.floor(hours / 24);
+
+  if (days > 0) {
+    const remainHours = hours % 24;
+    return `${days}d ${remainHours}h`;
+  }
+  if (hours > 0) {
+    const remainMinutes = minutes % 60;
+    return `${hours}h ${remainMinutes}m`;
+  }
+  if (minutes > 0) {
+    return `${minutes}m`;
+  }
+  return `${seconds}s`;
+}
+
+/**
+ * Find the matching open trade ticket for a closed Hyperliquid position.
+ */
+function findMatchingTrade(userId, coin, direction) {
+  const openTrades = getOpenTrades(userId);
+  return openTrades.find(t =>
+    t.source === 'hyperliquid' &&
+    t.asset === coin &&
+    t.direction === direction
+  ) || null;
+}
+
+/**
+ * Auto-close a trade ticket with P&L data from Hyperliquid.
+ */
+function autoCloseTradeTicket(userId, tradeId, exitPrice, pnl, pnlPercent, isWin) {
+  const outcome = isWin === null ? 'Win' : (isWin ? 'Win' : 'Loss');
+  return closeTrade(userId, tradeId, {
+    outcome,
+    exitPrice: exitPrice ? String(exitPrice) : null,
+    reflection: 'Auto-closed — position closed on Hyperliquid.',
+    closeScreenshotUrl: null,
+    pnl: pnl !== null ? pnl : undefined,
+    pnlPercent: pnlPercent !== null ? pnlPercent : undefined,
+  });
+}
+
+/**
  * Create a trade ticket from a Hyperliquid position.
  */
 function createTradeTicket(userId, position, username) {
@@ -195,9 +403,15 @@ function startPoller(client) {
     for (const { userId, wallet, channelId } of wallets) {
       try {
         const positions = await fetchPositions(wallet);
+
+        // Detect closed positions BEFORE updating the cache
+        const closedPositions = detectClosedPositions(userId, positions);
+
+        // Detect new positions (this also updates the cache)
         const newPositions = detectNewPositions(userId, positions);
 
-        if (newPositions.length === 0) continue;
+        const hasActivity = newPositions.length > 0 || closedPositions.length > 0;
+        if (!hasActivity) continue;
 
         // Fetch the channel to post in
         let channel;
@@ -217,6 +431,38 @@ function startPoller(client) {
           console.error(`[HL Poller] Cannot fetch user ${userId}:`, err.message);
         }
 
+        // Handle closed positions
+        if (closedPositions.length > 0) {
+          // Fetch recent fills to determine exit prices
+          const fills = await fetchRecentFills(wallet);
+
+          for (const closedPos of closedPositions) {
+            console.log(`[HL Poller] Position closed: ${username} ${closedPos.direction} ${closedPos.coin}`);
+
+            // Get exit price from recent fills
+            const exitPrice = getExitPriceFromFills(fills, closedPos.coin);
+
+            // Find matching open trade ticket
+            const trade = findMatchingTrade(userId, closedPos.coin, closedPos.direction);
+
+            // Build close notification embed
+            const { embed, pnl, pnlPercent, isWin } = buildCloseEmbed(closedPos, exitPrice, trade, username);
+
+            // Auto-close the trade ticket if found
+            if (trade) {
+              autoCloseTradeTicket(userId, trade.tradeId, exitPrice, pnl, pnlPercent, isWin);
+              console.log(`[HL Poller] Auto-closed trade ticket #${trade.id} for ${closedPos.coin} ${closedPos.direction}`);
+            }
+
+            try {
+              await channel.send({ embeds: [embed] });
+            } catch (err) {
+              console.error(`[HL Poller] Failed to post close embed in channel ${channelId}:`, err.message);
+            }
+          }
+        }
+
+        // Handle new positions (existing logic)
         for (const pos of newPositions) {
           const size = parseFloat(pos.szi);
           const direction = size > 0 ? 'Long' : 'Short';
