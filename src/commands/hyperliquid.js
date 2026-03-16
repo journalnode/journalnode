@@ -45,7 +45,16 @@ module.exports = {
 
   async handleAdd(interaction, userId, username) {
     const wallet = interaction.options.getString('wallet');
-    const label = interaction.options.getString('label') || 'Main';
+    // Auto-generate unique default label if none provided
+    let label = interaction.options.getString('label');
+    if (!label) {
+      const existing = getUserWallets(userId);
+      if (existing.length === 0) {
+        label = 'Main';
+      } else {
+        label = `Wallet ${existing.length + 1}`;
+      }
+    }
 
     if (!isValidAddress(wallet)) {
       const errorEmbed = new EmbedBuilder()
@@ -150,11 +159,11 @@ module.exports = {
       return;
     }
 
-    // Multiple wallets — show dropdown to pick which one to remove
+    // Multiple wallets — show dropdown with full address in description to distinguish
     const options = wallets.map(w => ({
-      label: `${w.label} — ${truncateAddress(w.wallet)}`,
+      label: `${w.label} — ${truncateAddress(w.wallet)}`.slice(0, 100),
       value: w.id,
-      description: `Linked ${new Date(w.linkedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`,
+      description: `${w.wallet}`.slice(0, 100),
     }));
 
     const select = new StringSelectMenuBuilder()
@@ -204,11 +213,11 @@ module.exports = {
       return;
     }
 
-    // Multiple wallets — show dropdown
+    // Multiple wallets — show dropdown with enough address to distinguish them
     const options = wallets.map(w => ({
-      label: `${w.label} — ${truncateAddress(w.wallet)}`,
+      label: `${w.label} — ${truncateAddress(w.wallet)}`.slice(0, 100),
       value: `${w.id}_RENLBL_${newLabel}`,
-      description: `Currently labeled "${w.label}"`,
+      description: `${w.wallet}`.slice(0, 100),
     }));
 
     const select = new StringSelectMenuBuilder()
