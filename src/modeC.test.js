@@ -76,6 +76,9 @@ const DOWNWARD_ESTIMATES = [4.0, 3.5, 3.0, 2.5, 2.0];
 // Oscillating set: direction changes more than once
 const OSCILLATING_ESTIMATES = [3.0, 4.0, 2.0, 5.0, 1.0];
 
+// Flat set: perfectly deterministic model returning identical estimates
+const FLAT_ESTIMATES = [3.0, 3.0, 3.0, 3.0, 3.0];
+
 // ---------------------------------------------------------------------------
 // Handler factory
 // ---------------------------------------------------------------------------
@@ -287,6 +290,26 @@ async function runAll() {
 
     console.log(`    Estimates: ${result.runs.map(r => r.estimatedMarketCapBillions).join(' → ')}`);
     console.log(`    Drift: ${result.driftDirection}`);
+  });
+
+  await test('flat sequence (identical estimates) produces "flat" drift', async () => {
+    clearCache();
+    const handler = createSequentialHandler(FLAT_ESTIMATES);
+
+    const result = await runModeC({
+      ticker: 'AAPL',
+      assetClass: 'equity',
+      selectedModel: 'stub/model-alpha',
+      _handlerOverride: handler,
+    });
+
+    assert(result.driftDirection === 'flat',
+      `driftDirection should be "flat" (got "${result.driftDirection}")`);
+    assert(result.stats.cv === 0 || result.stats.cv < 0.001,
+      `CV should be ~0 for identical estimates (got ${result.stats.cv})`);
+
+    console.log(`    Estimates: ${result.runs.map(r => r.estimatedMarketCapBillions).join(' → ')}`);
+    console.log(`    Drift: ${result.driftDirection}, CV: ${result.stats.cv}`);
   });
 
   // ── Scenario 4: CV bucket → confusion summary mapping ─────────────

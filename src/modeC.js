@@ -80,6 +80,7 @@ function computeDriftDirection(estimates) {
   const overall = estimates[estimates.length - 1] - estimates[0];
   if (overall > 0) return 'upward';
   if (overall < 0) return 'downward';
+  if (directionChanges === 0) return 'flat';
   return 'oscillating';
 }
 
