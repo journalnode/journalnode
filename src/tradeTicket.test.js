@@ -3,6 +3,7 @@ const path = require('path');
 
 // --- Stub modelReliability before requiring tradeTicket ---
 const reliabilityCalls = [];
+const scoreCalls = [];
 const originalReliabilityPath = require.resolve('./modelReliability');
 require.cache[originalReliabilityPath] = {
   id: originalReliabilityPath,
@@ -13,7 +14,10 @@ require.cache[originalReliabilityPath] = {
       reliabilityCalls.push(params);
       return 'mock-prediction-id';
     },
-    scorePrediction: () => 1.0,
+    scorePrediction: (id, outcome) => {
+      scoreCalls.push({ id, outcome });
+      return 1.0;
+    },
     getModelReliability: () => 1.0,
     getModelStats: () => ({}),
     closeDb: () => {}
@@ -197,6 +201,7 @@ if (fs.existsSync(_JOURNAL_PATH)) {
   console.log('\nTradeTicket — Close Workflow:');
 
   reliabilityCalls.length = 0; // reset call tracker
+  scoreCalls.length = 0;
 
   let closedTicket;
   await test('closeTradeTicket closes ticket with win outcome', async () => {
@@ -220,6 +225,12 @@ if (fs.existsSync(_JOURNAL_PATH)) {
     assert(call.modeUsed === 'A', `expected A, got ${call.modeUsed}`);
     assert(call.predictedDirection === 'bullish', `expected bullish, got ${call.predictedDirection}`);
     assert(call.predictedValue === 72, `expected 72, got ${call.predictedValue}`);
+  });
+
+  await test('scorePrediction called with mapped outcome on close', async () => {
+    assert(scoreCalls.length === 1, `expected 1 scorePrediction call, got ${scoreCalls.length}`);
+    assert(scoreCalls[0].id === 'mock-prediction-id', `expected mock-prediction-id, got ${scoreCalls[0].id}`);
+    assert(scoreCalls[0].outcome === 'correct', `expected 'correct' (mapped from 'win'), got ${scoreCalls[0].outcome}`);
   });
 
   await test('getOpenTickets returns only unclosed records after close', async () => {

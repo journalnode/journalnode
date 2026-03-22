@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { assembleDataPack } = require('./rawDataPack');
-const { recordPrediction } = require('./modelReliability');
+const { recordPrediction, scorePrediction } = require('./modelReliability');
 
 const JOURNAL_PATH = path.join(__dirname, '..', 'data', 'tradeJournal.jsonl');
 const DATA_DIR = path.join(__dirname, '..', 'data');
@@ -165,7 +165,7 @@ async function closeTradeTicket({ id, exitPrice, outcome }) {
   const outcomeMap = { win: 'correct', loss: 'incorrect', breakeven: 'partial' };
   const predictedDirection = record.modelConsensus;
 
-  recordPrediction({
+  const predictionId = recordPrediction({
     modelName: `sap-mode-${record.modeUsed}`,
     asset: record.ticker,
     assetClass: record.assetClass,
@@ -175,6 +175,8 @@ async function closeTradeTicket({ id, exitPrice, outcome }) {
     modeUsed: record.modeUsed,
     timestamp: record.createdAt
   });
+
+  scorePrediction(predictionId, outcomeMap[outcome]);
 
   return record;
 }
