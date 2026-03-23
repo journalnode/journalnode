@@ -11,10 +11,19 @@ const LEDGER_PATH = path.join(__dirname, '..', 'data', 'anchorLedger.jsonl');
 // ---------------------------------------------------------------------------
 
 /**
- * Deterministic JSON serialization with sorted keys.
+ * Deterministic JSON serialization with recursively sorted keys.
  */
 function deterministicStringify(obj) {
-  return JSON.stringify(obj, Object.keys(obj).sort());
+  return JSON.stringify(obj, (key, value) => {
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      const sorted = {};
+      for (const k of Object.keys(value).sort()) {
+        sorted[k] = value[k];
+      }
+      return sorted;
+    }
+    return value;
+  });
 }
 
 /**
