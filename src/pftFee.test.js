@@ -159,8 +159,8 @@ async function run() {
     failures++;
   }
 
-  // --- 4. getUserFeeStatement & high-water mark ---
-  console.log('\n=== getUserFeeStatement & high-water mark ===');
+  // --- 4. getUserFeeStatement & above-water check ---
+  console.log('\n=== getUserFeeStatement & above-water check ===');
   const stmt = await getUserFeeStatement({ userDiscordId: userId });
 
   if (stmt.totalSignals === 2) {
@@ -178,7 +178,7 @@ async function run() {
   }
 
   // Cumulative P&L: BTC correct = +7.69%, ETH incorrect = -6.67% → net ~+1.03%
-  // Since net is positive, fees should be owed and HWM not active
+  // Since net is positive, fees should be owed and not net-negative
   if (stmt.cumulativePnlPct > 0) {
     console.log(`  PASS [statement]: cumulativePnlPct positive (${stmt.cumulativePnlPct.toFixed(4)}%)`);
   } else {
@@ -193,16 +193,16 @@ async function run() {
     failures++;
   }
 
-  if (stmt.highWaterMarkActive === false) {
-    console.log('  PASS [statement]: highWaterMarkActive is false (net positive P&L)');
+  if (stmt.isNetNegative === false) {
+    console.log('  PASS [statement]: isNetNegative is false (net positive P&L)');
   } else {
-    console.error('  FAIL [statement]: highWaterMarkActive should be false');
+    console.error('  FAIL [statement]: isNetNegative should be false');
     failures++;
   }
 
-  // --- 5. High-water mark suppression test ---
+  // --- 5. Above-water fee suppression test ---
   // Add a big losing signal to make cumulative P&L negative
-  console.log('\n=== High-water mark suppression ===');
+  console.log('\n=== Above-water fee suppression ===');
   const sig3 = await recordSignal({
     ticketId: 'ticket-3',
     asset: 'ethereum',
@@ -222,31 +222,31 @@ async function run() {
   await checkObservationWindows();
   const stmt2 = await getUserFeeStatement({ userDiscordId: userId });
 
-  // Cumulative: +7.69% - 6.67% - 30% = ~-28.97% → negative → HWM active
+  // Cumulative: +7.69% - 6.67% - 30% = ~-28.97% → negative → fee suppression active
   if (stmt2.cumulativePnlPct < 0) {
-    console.log(`  PASS [hwm]: cumulativePnlPct is negative (${stmt2.cumulativePnlPct.toFixed(4)}%)`);
+    console.log(`  PASS [above-water]: cumulativePnlPct is negative (${stmt2.cumulativePnlPct.toFixed(4)}%)`);
   } else {
-    console.error(`  FAIL [hwm]: expected negative cumulative P&L, got ${stmt2.cumulativePnlPct}`);
+    console.error(`  FAIL [above-water]: expected negative cumulative P&L, got ${stmt2.cumulativePnlPct}`);
     failures++;
   }
 
-  if (stmt2.highWaterMarkActive === true) {
-    console.log('  PASS [hwm]: highWaterMarkActive is true');
+  if (stmt2.isNetNegative === true) {
+    console.log('  PASS [above-water]: isNetNegative is true');
   } else {
-    console.error('  FAIL [hwm]: highWaterMarkActive should be true');
+    console.error('  FAIL [above-water]: isNetNegative should be true');
     failures++;
   }
 
   // The BTC fee was accrued when cumulative was positive (+7.69% at that point),
-  // but after ETH incorrect makes cumulative negative, HWM logic iterates chronologically.
+  // but after ETH incorrect makes cumulative negative, above-water logic iterates chronologically.
   // After sig1 (BTC correct): cumPnl = +7.69% (positive → fee counts)
   // After sig2 (ETH incorrect): cumPnl = +7.69% - 6.67% = +1.03% (still positive → no additional fee from incorrect anyway)
   // After sig3 (ETH incorrect): cumPnl = +1.03% - 30% = -28.97% (negative → fee would NOT count, but sig3 has rawFeeAccrued=0 anyway)
   // So totalFeesOwed should still be the BTC fee (accrued when cumPnl was positive)
   if (stmt2.totalFeesOwed > 0 && Math.abs(stmt2.totalFeesOwed - expectedBtcFee) < 0.001) {
-    console.log(`  PASS [hwm]: totalFeesOwed correctly includes only BTC fee from when P&L was positive`);
+    console.log(`  PASS [above-water]: totalFeesOwed correctly includes only BTC fee from when P&L was positive`);
   } else {
-    console.error(`  FAIL [hwm]: totalFeesOwed expected ${expectedBtcFee.toFixed(4)}, got ${stmt2.totalFeesOwed}`);
+    console.error(`  FAIL [above-water]: totalFeesOwed expected ${expectedBtcFee.toFixed(4)}, got ${stmt2.totalFeesOwed}`);
     failures++;
   }
 

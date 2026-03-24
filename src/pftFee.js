@@ -194,14 +194,14 @@ async function getUserFeeStatement({ userDiscordId }) {
       cumulativePnlPct -= Math.abs(signedPnl);
     }
 
-    // High-water mark: only accrue fees when cumulative P&L is positive
+    // Above-water check: only accrue fees when cumulative P&L is positive
     if (cumulativePnlPct > 0 && sig.rawFeeAccrued > 0) {
       totalFeesOwed += sig.rawFeeAccrued;
     }
   }
 
   const totalSignals = userSignals.length;
-  const highWaterMarkActive = cumulativePnlPct <= 0;
+  const isNetNegative = cumulativePnlPct <= 0;
 
   return {
     totalSignals,
@@ -209,7 +209,7 @@ async function getUserFeeStatement({ userDiscordId }) {
     incorrectSignals,
     cumulativePnlPct,
     totalFeesOwed,
-    highWaterMarkActive,
+    isNetNegative,
     signals: userSignals,
   };
 }
