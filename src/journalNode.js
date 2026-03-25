@@ -1,5 +1,6 @@
 'use strict';
 
+const fs = require('fs');
 const { runModeA } = require('./modeA');
 const { runModeB } = require('./modeB');
 const { runModeC } = require('./modeC');
@@ -177,8 +178,33 @@ if (require.main === module) {
         });
         console.log(JSON.stringify(result, null, 2));
       } else if (command === 'open-trade') {
-        console.error('open-trade requires sapOutput via programmatic API');
-        process.exit(1);
+        let sapOutput;
+        if (flags.sapJson) {
+          sapOutput = JSON.parse(flags.sapJson);
+        } else if (flags.sapFile) {
+          sapOutput = JSON.parse(fs.readFileSync(flags.sapFile, 'utf-8'));
+        } else if (!process.stdin.isTTY) {
+          const chunks = [];
+          for await (const chunk of process.stdin) chunks.push(chunk);
+          sapOutput = JSON.parse(Buffer.concat(chunks).toString());
+        } else {
+          console.error('open-trade requires sapOutput via stdin pipe, --sapFile, or --sapJson');
+          process.exit(1);
+        }
+
+        const result = await openTrade({
+          ticker: flags.ticker,
+          assetClass: flags.assetClass,
+          direction: flags.direction,
+          entryPrice: parseFloat(flags.entryPrice),
+          stopLoss: flags.stopLoss ? parseFloat(flags.stopLoss) : undefined,
+          takeProfit: flags.takeProfit ? parseFloat(flags.takeProfit) : undefined,
+          timeframe: flags.timeframe || '1W',
+          sapOutput,
+          userAlignment: flags.userAlignment || 'agree',
+          userDiscordId: flags.userDiscordId,
+        });
+        console.log(JSON.stringify(result, null, 2));
       } else if (command === 'close-trade') {
         const result = await closeTrade({
           ticketId: flags.ticketId,
@@ -190,7 +216,7 @@ if (require.main === module) {
       } else {
         console.error('Usage: node journalNode.js <analyze|open-trade|close-trade> [--flags]');
         console.error('  analyze    --ticker BTC --assetClass crypto --mode A --timeframe 1W');
-        console.error('  open-trade (programmatic API only — requires sapOutput object)');
+        console.error('  open-trade --direction long --entryPrice 67000 [--sapFile out.json | --sapJson \'...\' | piped stdin]');
         console.error('  close-trade --ticketId <id> --exitPrice 70000 --outcome win');
         process.exit(1);
       }
