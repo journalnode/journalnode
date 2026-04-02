@@ -39,6 +39,8 @@ const menuCmd = require('./commands/menu');
 commands.set(menuCmd.name, menuCmd);
 const analyzeCmd = require('./commands/analyze');
 commands.set(analyzeCmd.name, analyzeCmd);
+const llmAnalyzeV2Cmd = require('./commands/llmanalyzev2');
+commands.set(llmAnalyzeV2Cmd.name, llmAnalyzeV2Cmd);
 const faqCmd = require('./commands/faq');
 commands.set(faqCmd.name, faqCmd);
 const tradehistoryCmd = require('./commands/tradehistory');
@@ -225,6 +227,9 @@ const analyzeBuilder = new SlashCommandBuilder()
   .setDescription(analyzeCmd.description);
 slashCommands.push(analyzeBuilder.toJSON());
 
+const llmAnalyzeV2Builder = llmAnalyzeV2Cmd.buildCommand();
+slashCommands.push(llmAnalyzeV2Builder.toJSON());
+
 // /faq: no options needed
 const faqBuilder = new SlashCommandBuilder()
   .setName('faq')
@@ -406,7 +411,7 @@ client.once('clientReady', async () => {
   try {
     console.log('Registering slash commands...');
     await rest.put(Routes.applicationCommands(client.user.id), { body: slashCommands });
-    const allNames = ['chat', 'postfiat', 'wallets', 'send', 'balance', 'mint', 'gallery', 'receive', 'onboard', 'trade', 'mytrades', 'menu', 'llmanalyze', 'faq', 'tradehistory', 'chart', 'sendnft', 'thesis', 'compare', 'watchlist', 'stats', 'hyperliquid'].map(c => `/${c}`).join(', ');
+    const allNames = ['chat', 'postfiat', 'wallets', 'send', 'balance', 'mint', 'gallery', 'receive', 'onboard', 'trade', 'mytrades', 'menu', 'llmanalyze', 'llmanalyzev2', 'faq', 'tradehistory', 'chart', 'sendnft', 'thesis', 'compare', 'watchlist', 'stats', 'hyperliquid'].map(c => `/${c}`).join(', ');
     console.log(`Registered ${slashCommands.length} slash commands: ${allNames}`);
   } catch (err) {
     console.error('Failed to register slash commands:', err);
@@ -485,7 +490,19 @@ client.on('interactionCreate', async (interaction) => {
 
   // Handle button interactions
   if (interaction.isButton()) {
-    if (interaction.customId === 'chart_analyze') {
+    if (llmAnalyzeV2Cmd.isButtonInteraction(interaction)) {
+      try {
+        await llmAnalyzeV2Cmd.handleButton(interaction);
+      } catch (err) {
+        console.error('[/llmanalyzev2] Button handler failed:', err);
+        const errorMsg = 'Something went wrong. Please try `/llmanalyzev2` again.';
+        if (interaction.deferred || interaction.replied) {
+          await interaction.followUp({ content: errorMsg, flags: 64 }).catch(() => {});
+        } else {
+          await interaction.reply({ content: errorMsg, flags: 64 }).catch(() => {});
+        }
+      }
+    } else if (interaction.customId === 'chart_analyze') {
       try {
         await chartCmd.handleAnalysisButton(interaction);
       } catch (err) {
