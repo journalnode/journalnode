@@ -55,6 +55,14 @@ npm start
 npm test
 ```
 
+### 5. Run the Task Node Audit Agent
+
+```bash
+npm run tasknode:agent
+```
+
+The Task Node agent reuses the existing validator audit pipeline in `src/audit.js` and registers itself on the Task Node Agents tab as `Journal Node`. For production, set `TASKNODE_AGENT_SEED_FILE` to a dedicated bot seed file and keep `GITHUB_GIST_TOKEN` plus `OPENROUTER_API_KEY` configured. On first boot, the agent skips pre-existing inbound messages by default and only handles new `/audit <url>` requests.
+
 ## Commands
 
 ### Journal Insights (chat commands)

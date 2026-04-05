@@ -2,3 +2,6 @@ node_modules/
 .env
 dist/
 data/
+.keystone-api-key
+postfiatorg-pft-chatbot-mcp-0.5.1.tgz
+tmp/
