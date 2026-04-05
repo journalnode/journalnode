@@ -59,6 +59,8 @@ const statsCmd = require('./commands/stats');
 commands.set(statsCmd.name, statsCmd);
 const hyperliquidCmd = require('./commands/hyperliquid');
 commands.set(hyperliquidCmd.name, hyperliquidCmd);
+const auditCmd = require('./commands/audit');
+commands.set(auditCmd.name, auditCmd);
 
 const { chat: llmChat } = require('./openrouter');
 const { formatEntries, summarizeStats, sendLong } = require('./commands/helpers');
@@ -357,6 +359,9 @@ const statsBuilder = new SlashCommandBuilder()
   .setDescription(statsCmd.description);
 slashCommands.push(statsBuilder.toJSON());
 
+const auditBuilder = auditCmd.buildCommand();
+slashCommands.push(auditBuilder.toJSON());
+
 // /hyperliquid: multi-wallet management subcommands
 const hyperliquidBuilder = new SlashCommandBuilder()
   .setName('hyperliquid')
@@ -411,7 +416,7 @@ client.once('clientReady', async () => {
   try {
     console.log('Registering slash commands...');
     await rest.put(Routes.applicationCommands(client.user.id), { body: slashCommands });
-    const allNames = ['chat', 'postfiat', 'wallets', 'send', 'balance', 'mint', 'gallery', 'receive', 'onboard', 'trade', 'mytrades', 'menu', 'llmanalyze', 'llmanalyzev2', 'faq', 'tradehistory', 'chart', 'sendnft', 'thesis', 'compare', 'watchlist', 'stats', 'hyperliquid'].map(c => `/${c}`).join(', ');
+    const allNames = ['chat', 'postfiat', 'wallets', 'send', 'balance', 'mint', 'gallery', 'receive', 'onboard', 'trade', 'mytrades', 'menu', 'llmanalyze', 'llmanalyzev2', 'faq', 'tradehistory', 'chart', 'sendnft', 'thesis', 'compare', 'watchlist', 'stats', 'audit', 'hyperliquid'].map(c => `/${c}`).join(', ');
     console.log(`Registered ${slashCommands.length} slash commands: ${allNames}`);
   } catch (err) {
     console.error('Failed to register slash commands:', err);

@@ -40,7 +40,7 @@ A Discord bot that combines AI-powered journaling insights with a multi-mode tra
 cp .env.example .env
 ```
 
-Edit `.env` and fill in `DISCORD_TOKEN` and `OPENROUTER_API_KEY` at minimum. See `.env.example` for optional settings (PFT master seed, Pinata JWT, etc.).
+Edit `.env` and fill in `DISCORD_TOKEN` and `OPENROUTER_API_KEY` at minimum. Add `GITHUB_GIST_TOKEN` as well if you want `/audit` to publish reports to the journalnode GitHub account. See `.env.example` for other optional settings (PFT master seed, Pinata JWT, etc.).
 
 ### 3. Install & Run
 
@@ -86,6 +86,7 @@ npm test
 | `/compare` | Multi-asset comparison |
 | `/watchlist` | Asset watchlist with AI briefings |
 | `/stats` | Trading performance dashboard |
+| `/audit` | Canonical validator-page audit with public GitHub gist output |
 | `/hyperliquid` | Hyperliquid perpetuals integration |
 
 ### Wallet & Blockchain (slash commands)

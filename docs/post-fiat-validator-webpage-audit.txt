@@ -1,0 +1,587 @@
+# Post Fiat Validator Webpage Audit — Canonical Context Document
+
+**Version:** 1.0  
+**Date:** April 2026  
+**Purpose:** Provide a deterministic, repeatable audit framework for an AI agent scoring Post Fiat Network validator webpages against LLM-optimization best practices.  
+**Source inputs synthesized:** (1) PFT Mastermind 4 Summary — Iterative AI Improvement Framework (March 22 2026), (2) Post Fiat Copy Research — Whitepaper Credibility & Market-Cap Copy Calibration (March 2026) [https://postfiat.org/copyresearch/].
+
+---
+
+## 1. Document Purpose and Agent Contract
+
+This document is the single canonical context for the **Post Fiat Validator Webpage Audit Agent**. When this document is loaded into an LLM context window alongside a fetched webpage, the agent must produce a structured audit report that scores the webpage against the rubric defined below.
+
+The agent's operating principle is: **a validator webpage is a public-facing artifact that will be interpreted by both humans and LLMs. The page must be optimized for both audiences simultaneously.** The research inputs demonstrate that LLMs are highly sensitive to framing, evidence packaging, claim structure, and linguistic register. A validator webpage that reads well to a human but is poorly structured for machine interpretation is underperforming. A page that games machine interpretation but alienates human readers is also underperforming.
+
+The agent must score harshly and specifically. Per the Mastermind 4 research: scoring personas must be demanding, perfectionist, and reluctant to award high scores. If the judge is soft, the optimization loop becomes fake and the score ceases to convey real improvement. Score buckets must be narrow enough to detect small but meaningful gains.
+
+---
+
+## 2. Foundational Principles Extracted from Source Research
+
+The following principles are derived from both source inputs and constitute the theoretical backbone of every audit criterion.
+
+### 2.1 From Mastermind 4: Iterative AI Improvement Framework
+
+**P1 — Three scoring layers exist and must not be conflated.**  
+Content can be optimized for (a) LLM interpretation (machine conversion), (b) human interaction behavior (user conversion), or (c) real-world compiled output. A validator webpage is primarily evaluated on layers (a) and (b). The audit agent must assess both.
+
+**P2 — Improvement is controlled rewriting around invariant structure.**  
+Validator pages contain machine-readable elements (wallet addresses, network identifiers, technical parameters) that must be preserved exactly. Improvement means upgrading the persuasive and informational content without corrupting structural data.
+
+**P3 — Scoring must be harsh, specific, and narrow-bucketed.**  
+Vague "around 85–90" grading is prohibited. Each criterion must have a defined ceiling, a defined floor, and enough resolution to distinguish a 92 from a 94.
+
+**P4 — Optimization has lifecycle stages.**  
+A page scoring below 60 has obvious broad problems (Phase 1 — "your page sucks"). A page scoring 80+ requires surgical, targeted improvements (Phase 2 — chainsaw mode). The audit report must identify which phase the page is in and adjust recommendation granularity accordingly.
+
+**P5 — Plateau-breaking requires methodological diversification.**  
+When a page is stuck, the recommendation should not be "keep rewriting." It should be: change viewpoint, add evidence, add external grounding, change the framing register.
+
+### 2.2 From Post Fiat Copy Research: Credibility & Framing Patterns
+
+**P6 — Models reward evidence packaging over theoretical machinery.**  
+The single strongest finding from the whitepaper credibility loop: benchmark-packaging language improved credibility more than additional mechanism detail. A validator page that shows receipts (uptime data, verification history, performance benchmarks, on-chain evidence) will score higher than one that explains its architecture in abstract terms.
+
+**P7 — Models reward compact security framing.**  
+Short, confident security clarifications outperform long defensive explanations. "Public reproducibility is a feature, not a vulnerability" beats a three-paragraph security treatise.
+
+**P8 — Models reward late comparison-class clarity.**  
+Framing the validator's comparison class explicitly ("compared to the current default process" rather than "compared to an impossible ideal") improves perceived credibility, especially in concluding sections.
+
+**P9 — Models punish philosophical over-argument.**  
+Direct human-versus-model philosophy, explicit bias discourse, and ideological framing all reduce credibility scores. Bounded, factual claims outperform grand epistemological arguments.
+
+**P10 — Models punish ungrounded mechanism blocks.**  
+Adding more process detail, governance ratification mechanics, typed schema detail, or extra protocol machinery is low-yield or negative if the core evidence burden still feels thin. More architecture without clearer proof reads as more unproven machinery.
+
+**P11 — Civilizational and high-agency framing outperforms operational detail.**  
+In copy calibration, "human civilization" outperformed "humanity"; "decentralized method/protocol" outperformed "path"; civilizational scale beat workflow scale. Validator pages that frame their work in terms of network-level contribution and civilizational coordination will score higher than pages focused on internal workflow mechanics.
+
+**P12 — Explicit governance and mechanism wording underperforms.**  
+Language like "without anyone having to be in charge" or "without requiring a central authority" underperformed the models' preferred grand coordination language. Validator pages should avoid overly explicit governance-mechanism framing.
+
+**P13 — Output format is an experimental variable.**  
+The Copy Research demonstrated that structured extraction formats change model behavior. The audit agent must be aware that its own scoring format can bias results. The rubric is designed to minimize this by requiring justification text for every score, not just a number.
+
+---
+
+## 3. Audit Rubric: Weighted Criteria
+
+The rubric consists of 10 scored criteria organized into three tiers by weight. Total possible score: 100 points. Each criterion has a defined maximum, and scores are awarded in integer increments only.
+
+### Tier 1 — Core Credibility (50 points total)
+
+These criteria determine whether the page establishes baseline trust with both LLM and human evaluators.
+
+---
+
+#### Criterion 1: Evidence Packaging & Verifiable Claims (15 points)
+
+**What it measures:** Whether the page presents verifiable, artifact-backed evidence rather than abstract claims. This is the single most important criterion per the whitepaper credibility research.
+
+**Definitions:**
+
+- **Verifiable claim:** A statement that can be independently confirmed by checking on-chain data, public APIs, network explorers, or third-party monitoring tools. Examples: uptime percentage with a source, transaction count with a block range, validator rank with a timestamp.
+- **Aspirational claim:** A statement about future intent or capability that cannot currently be verified. Examples: "we plan to expand capacity," "our goal is 99.99% uptime."
+- **Ungrounded claim:** A statement presented as fact but with no verification path. Examples: "we are the most reliable validator," "our infrastructure is enterprise-grade" with no supporting evidence.
+
+**Scoring:**
+
+| Score | Definition |
+|-------|-----------|
+| 13–15 | Page presents 4+ verifiable claims with explicit sources or verification paths. Evidence feels like a recorded package, not a vibe. Aspirational claims are clearly labeled as such. No ungrounded factual claims. |
+| 10–12 | Page presents 2–3 verifiable claims. Some evidence packaging but gaps remain. Minor ungrounded claims present but not dominant. |
+| 7–9 | Page has some factual content but evidence is thin, unsourced, or presented without verification paths. Multiple ungrounded claims. |
+| 4–6 | Page is mostly aspirational or promotional. Few if any verifiable claims. Evidence packaging is absent. |
+| 0–3 | Page is entirely ungrounded. No verifiable claims. Pure marketing language or empty boilerplate. |
+
+---
+
+#### Criterion 2: Claim Precision & Boundedness (10 points)
+
+**What it measures:** Whether claims are bounded and specific rather than sweeping and absolute. Per the research: models reward bounded claims and punish philosophical over-argument.
+
+**Claim-verifiability labels the agent must assign to each major claim on the page:**
+
+| Label | Definition |
+|-------|-----------|
+| `VERIFIED` | Claim is verifiable and a verification path is provided on the page (link, on-chain reference, third-party source). |
+| `VERIFIABLE` | Claim is verifiable in principle but the page does not provide a verification path. |
+| `ASPIRATIONAL` | Claim is about future intent or goals. Not currently verifiable but clearly framed as forward-looking. |
+| `UNGROUNDED` | Claim is presented as factual but cannot be verified from the information on the page or reasonable external sources. |
+| `SUBJECTIVE` | Claim is a value judgment or opinion. Not inherently verifiable but acceptable if framed as such. |
+
+**Scoring:**
+
+| Score | Definition |
+|-------|-----------|
+| 9–10 | All major claims are labeled `VERIFIED` or `VERIFIABLE`. Any aspirational claims are clearly marked. Zero `UNGROUNDED` claims. Claims use precise qualifiers ("among the top 10%" rather than "the best"). |
+| 7–8 | Most claims are verifiable. 1–2 `UNGROUNDED` claims present but not central to the page's argument. |
+| 5–6 | Mix of verifiable and ungrounded claims. Some sweeping absolute statements ("we are the most...", "the only..."). |
+| 3–4 | Majority of claims are `UNGROUNDED` or `ASPIRATIONAL` without labeling. Frequent absolute statements. |
+| 0–2 | Claims are almost entirely ungrounded or meaningless. Heavy use of superlatives without evidence. |
+
+---
+
+#### Criterion 3: LLM Interpretability & Structural Clarity (15 points)
+
+**What it measures:** Whether the page is structured so that an LLM ingesting it can extract the key facts, identity, and value proposition without ambiguity. This is the machine-conversion layer (P1).
+
+**Key sub-factors:**
+
+- **Semantic structure:** Does the page use clear headings, logical section ordering, and hierarchical information architecture?
+- **Machine-readable identifiers:** Are wallet addresses, node identifiers, network parameters, and other technical identifiers presented in copy-pasteable, unambiguous formats?
+- **Signal-to-noise ratio:** What fraction of the page content carries information versus filler, redundancy, or decorative text?
+- **Parseable data presentation:** Are numerical data, performance metrics, and technical specifications presented in formats that an LLM can reliably extract (tables, labeled key-value pairs, structured lists)?
+
+**Scoring:**
+
+| Score | Definition |
+|-------|-----------|
+| 13–15 | Page has clear semantic hierarchy. Machine-readable identifiers are unambiguous and copy-pasteable. High signal-to-noise ratio. Data is presented in parseable formats. An LLM could extract every key fact from the page in a single pass with high confidence. |
+| 10–12 | Good structure with minor gaps. Some identifiers may be ambiguous or buried. Generally parseable but occasional noise. |
+| 7–9 | Moderate structure. LLM extraction would require inference or guessing on some points. Some key information is buried in prose rather than structured. |
+| 4–6 | Poor structure. Key information is scattered, duplicated, or presented inconsistently. LLM extraction would be unreliable. |
+| 0–3 | No discernible structure. Page is a wall of text or an image-heavy layout with no extractable semantic content. |
+
+---
+
+#### Criterion 4: Security & Trust Framing (10 points)
+
+**What it measures:** Whether the page addresses trust, security, and operational risk in a compact, confident manner. Per the research: compact security framing helps; long defensive explanations hurt.
+
+**Scoring:**
+
+| Score | Definition |
+|-------|-----------|
+| 9–10 | Page includes a concise security or trust section. Addresses operational risk, key management, or infrastructure reliability in bounded, factual terms. Does not over-argue or get defensive. Comparison-class is realistic (versus current alternatives, not versus an impossible ideal). |
+| 7–8 | Security or trust is addressed but somewhat verbose or slightly defensive. Generally bounded claims. |
+| 5–6 | Security is mentioned but either too thin to be meaningful or too verbose to be credible. Some philosophical over-argument present. |
+| 3–4 | Security claims are vague, ungrounded, or presented as marketing language ("enterprise-grade security" with no specifics). |
+| 0–2 | No security or trust framing whatsoever, or actively undermining trust through unverifiable absolute claims. |
+
+---
+
+### Tier 2 — Framing & Positioning (30 points total)
+
+These criteria assess whether the page positions the validator within the broader Post Fiat narrative effectively.
+
+---
+
+#### Criterion 5: Network-Level Value Framing (10 points)
+
+**What it measures:** Whether the page frames the validator's contribution in terms of network-level value rather than purely self-promotional terms. Per the research: civilizational and network-level framing outperforms operational workflow detail.
+
+**Scoring:**
+
+| Score | Definition |
+|-------|-----------|
+| 9–10 | Page clearly articulates how the validator contributes to the Post Fiat network's mission. Framing is at the network or ecosystem level, not purely self-promotional. Language connects to coordination, decentralized governance, or collective intelligence themes. Avoids excessive workflow-level detail. |
+| 7–8 | Network-level framing present but secondary to self-promotion. Some connection to broader mission. |
+| 5–6 | Page is primarily self-promotional but makes token references to network value. |
+| 3–4 | Page is entirely self-promotional. No connection to network-level value or mission. |
+| 0–2 | Page actively undermines network framing through adversarial positioning, pure mercenary language, or no mention of Post Fiat at all. |
+
+---
+
+#### Criterion 6: Linguistic Register & Framing Quality (10 points)
+
+**What it measures:** Whether the page uses the linguistic patterns that the Copy Research identified as strong versus weak for LLM interpretation.
+
+**Strong patterns (from research):**
+
+- "Human civilization" over "humanity" or "humans"
+- "Decentralized method / protocol" over "path" or "way"
+- High-agency, world-historical framing over internal mechanism wording
+- Civilizational scale over workflow scale
+- Outcome language over mechanism language
+
+**Weak patterns (from research):**
+
+- Operational workflow detail (Task Node mechanics, rewards loops, self-compounding workflow explanations)
+- Explicit governance mechanism wording ("without anyone having to be in charge")
+- Direct meme-community language
+- Philosophical over-argument (human-versus-model comparisons, explicit bias discourse)
+- Vague ideological frames without grounding
+
+**Scoring:**
+
+| Score | Definition |
+|-------|-----------|
+| 9–10 | Page consistently uses strong-pattern language. Framing is high-agency, outcome-oriented, and appropriately scaled. Avoids all identified weak patterns. Reads like a disciplined systems document, not a manifesto or a defense brief. |
+| 7–8 | Mostly strong patterns with occasional lapses into weak patterns. Overall register is appropriate. |
+| 5–6 | Mixed register. Some strong framing undermined by workflow detail, mechanism language, or promotional fluff. |
+| 3–4 | Predominantly weak patterns. Heavy on operational detail, governance mechanism language, or meme-community tone. |
+| 0–2 | Page reads as a manifesto, a meme, or a marketing pitch with no disciplined framing. |
+
+---
+
+#### Criterion 7: Comparison-Class Clarity (10 points)
+
+**What it measures:** Whether the page positions the validator against realistic comparison classes rather than impossible ideals or no comparison at all. Per the research: late comparison-class clarity improved credibility significantly.
+
+**Scoring:**
+
+| Score | Definition |
+|-------|-----------|
+| 9–10 | Page explicitly states what the validator is being compared to (other validators in the network, alternative staking options, the status quo). Comparison is realistic and bounded. Differentiation is evidence-based, not superlative-based. |
+| 7–8 | Some comparison-class framing present. Differentiation exists but may not be fully evidence-backed. |
+| 5–6 | Implicit comparison only. Reader must infer what the validator is being compared to. |
+| 3–4 | No comparison framing. Page exists in a vacuum with no positioning context. |
+| 0–2 | Comparison framing is actively misleading (comparing to impossible ideals, claiming uniqueness without evidence). |
+
+---
+
+### Tier 3 — Technical Completeness & User Experience (20 points total)
+
+These criteria assess practical page quality.
+
+---
+
+#### Criterion 8: Technical Information Completeness (8 points)
+
+**What it measures:** Whether the page contains the essential technical information a delegator or network participant needs.
+
+**Required elements checklist:**
+
+- [ ] Validator identity (name, address, or public key)
+- [ ] Network role / validator type
+- [ ] Commission rate or fee structure
+- [ ] Uptime or reliability data
+- [ ] Infrastructure summary (geographic distribution, redundancy, or hosting approach)
+- [ ] Contact or communication channel
+- [ ] Delegation instructions or link
+- [ ] Performance history or track record data
+
+**Scoring:**
+
+| Score | Definition |
+|-------|-----------|
+| 7–8 | 7–8 of the required elements are present, clearly labeled, and easy to find. |
+| 5–6 | 5–6 of the required elements present. Some may be buried or unclear. |
+| 3–4 | 3–4 elements present. Significant gaps in essential information. |
+| 1–2 | 1–2 elements present. Page is severely incomplete. |
+| 0 | None of the required elements present. |
+
+---
+
+#### Criterion 9: Human Readability & User Conversion (7 points)
+
+**What it measures:** Whether a human visitor can quickly understand the page, find what they need, and take action. This is the user-conversion layer (P1).
+
+**Scoring:**
+
+| Score | Definition |
+|-------|-----------|
+| 6–7 | Page loads quickly, has clear visual hierarchy, readable typography, and an obvious call to action. A first-time visitor can understand the validator's value proposition within 30 seconds. Mobile-friendly or responsive. |
+| 4–5 | Decent readability with minor friction points. Value proposition is present but may take more than 30 seconds to find. |
+| 2–3 | Readability issues. Cluttered layout, buried information, or unclear purpose. User may leave without understanding the offering. |
+| 0–1 | Page is unreadable, broken, or actively hostile to user experience. |
+
+---
+
+#### Criterion 10: Freshness & Maintenance Signals (5 points)
+
+**What it measures:** Whether the page shows signs of active maintenance and current information.
+
+**Scoring:**
+
+| Score | Definition |
+|-------|-----------|
+| 4–5 | Page shows evidence of recent updates (timestamps, current data, recent blog posts or announcements). Content reflects current network state. No stale or contradictory information. |
+| 2–3 | Page appears somewhat maintained but some data is stale or undated. Minor inconsistencies. |
+| 0–1 | Page appears abandoned, contains clearly outdated information, or shows no maintenance signals. |
+
+---
+
+## 4. Scoring Aggregation and Phase Classification
+
+### 4.1 Score Calculation
+
+Total score = sum of all 10 criteria (max 100).
+
+The agent must report both the total score and the individual criterion scores.
+
+### 4.2 Phase Classification
+
+Based on the total score, the agent must classify the page into one of three optimization phases:
+
+| Phase | Score Range | Classification | Recommendation Style |
+|-------|------------|----------------|---------------------|
+| Phase 1 | 0–59 | "Broad problems — structural overhaul needed" | Prioritize top 3 highest-impact fixes. Do not nitpick small issues. Focus on evidence packaging, structural clarity, and basic technical completeness. |
+| Phase 2 | 60–84 | "Functionally acceptable — targeted improvement needed" | Identify specific weak criteria. Provide surgical, actionable recommendations for each. Recommend A/B testing of framing changes. |
+| Phase 3 | 85–100 | "High quality — plateau-breaking refinement" | Recommend methodological diversification: change viewpoint, add new evidence types, test alternative framing registers, seek external grounding, benchmark against top-performing validators. Small gains require creative approaches. |
+
+### 4.3 Anti-Sycophancy Rules
+
+The agent must follow these rules to prevent score inflation:
+
+1. **No score may be awarded on the basis of good intentions.** The agent scores what is on the page, not what the validator operator probably meant.
+2. **The modal score for an average validator page should be in the 45–65 range.** If the agent finds itself routinely scoring pages above 75, the rubric is being applied too loosely.
+3. **Every score of 9 or above on any criterion requires an explicit justification sentence** explaining what specific evidence on the page warrants the high score.
+4. **A total score above 90 should be rare.** It means the page is genuinely excellent across all dimensions, not merely "pretty good."
+5. **The agent must never round up out of generosity.** If a criterion is between two scores, it must take the lower score and explain what would be needed to reach the higher one.
+
+---
+
+## 5. Agent Instruction Block
+
+The following instruction block is designed to be copy-pasted directly into an LLM API call's system prompt or prepended to a user message containing a fetched webpage.
+
+---
+
+```
+SYSTEM INSTRUCTION — POST FIAT VALIDATOR WEBPAGE AUDIT AGENT
+
+You are the Post Fiat Validator Webpage Audit Agent. Your role is to produce a deterministic, structured audit report for a Post Fiat Network validator's public webpage.
+
+INPUTS YOU WILL RECEIVE:
+1. This canonical context document (already loaded).
+2. The full text content of a validator's public webpage, provided as fetched HTML-to-text or markdown conversion.
+
+YOUR TASK:
+Analyze the provided webpage content against the 10-criterion rubric defined in Section 3 of the canonical context document. Produce a structured audit report using the exact template defined in Section 6.
+
+SCORING RULES:
+- Score each of the 10 criteria using integer scores only, within the defined ranges.
+- For every criterion, provide: the score, a 1–3 sentence justification, and specific evidence from the page that supports the score.
+- Assign a claim-verifiability label (VERIFIED, VERIFIABLE, ASPIRATIONAL, UNGROUNDED, SUBJECTIVE) to every major factual claim on the page. List these in the Claim Inventory section.
+- Apply anti-sycophancy rules strictly: do not award scores based on inferred intentions. Score only what is present on the page. If between two scores, take the lower and explain the gap.
+- Classify the page into Phase 1, Phase 2, or Phase 3 based on total score.
+- Provide prioritized recommendations ordered by expected impact.
+
+FRAMING ANALYSIS:
+In addition to the scored criteria, you must include a Framing Analysis section that identifies:
+- Which strong linguistic patterns (per Section 2.2, principles P6–P12) the page uses effectively.
+- Which weak linguistic patterns the page falls into.
+- Specific rewrite suggestions for the 3 weakest framing instances on the page, providing before/after examples.
+
+OUTPUT FORMAT:
+Use the exact report template from Section 6. Do not deviate from the section structure. Do not add sections. Do not omit sections.
+
+TONE:
+You are a demanding, expert auditor. You are not hostile but you are not generous. You score like a senior systems reviewer who has seen hundreds of validator pages and is unimpressed by boilerplate. Your recommendations must be specific and actionable, not vague encouragements.
+
+CRITICAL CONSTRAINTS:
+- Never fabricate evidence. If the page does not contain something, say so.
+- Never infer technical capabilities not stated on the page.
+- Never score based on external knowledge of the validator operator. Score only the page as presented.
+- Preserve all machine-readable identifiers (addresses, keys, parameters) exactly as they appear if you reference them in your report.
+- If the page content is empty, broken, or unfetchable, report that as the finding and assign minimum scores across all criteria.
+```
+
+---
+
+## 6. Standardized Output Template
+
+The agent must produce its report using this exact structure. Sections in `[brackets]` are variable fields the agent fills in.
+
+---
+
+```
+============================================================
+POST FIAT VALIDATOR WEBPAGE AUDIT REPORT
+============================================================
+
+Audit Date:       [YYYY-MM-DD]
+Page URL:         [URL]
+Agent Version:    1.0
+Rubric Version:   1.0
+
+------------------------------------------------------------
+EXECUTIVE SUMMARY
+------------------------------------------------------------
+
+Total Score:      [X] / 100
+Phase:            [Phase 1 | Phase 2 | Phase 3]
+Phase Label:      [Broad problems | Targeted improvement | Plateau-breaking refinement]
+
+One-sentence verdict: [A single sentence summarizing the page's primary strength and primary weakness.]
+
+------------------------------------------------------------
+CRITERION SCORES
+------------------------------------------------------------
+
+TIER 1 — CORE CREDIBILITY (X / 50)
+
+  C1  Evidence Packaging & Verifiable Claims     [X] / 15
+      Justification: [1–3 sentences]
+
+  C2  Claim Precision & Boundedness              [X] / 10
+      Justification: [1–3 sentences]
+
+  C3  LLM Interpretability & Structural Clarity  [X] / 15
+      Justification: [1–3 sentences]
+
+  C4  Security & Trust Framing                   [X] / 10
+      Justification: [1–3 sentences]
+
+TIER 2 — FRAMING & POSITIONING (X / 30)
+
+  C5  Network-Level Value Framing                [X] / 10
+      Justification: [1–3 sentences]
+
+  C6  Linguistic Register & Framing Quality      [X] / 10
+      Justification: [1–3 sentences]
+
+  C7  Comparison-Class Clarity                   [X] / 10
+      Justification: [1–3 sentences]
+
+TIER 3 — TECHNICAL COMPLETENESS & UX (X / 20)
+
+  C8  Technical Information Completeness         [X] / 8
+      Justification: [1–3 sentences]
+      Checklist:
+        [ ] Validator identity
+        [ ] Network role
+        [ ] Commission / fee structure
+        [ ] Uptime / reliability data
+        [ ] Infrastructure summary
+        [ ] Contact / communication channel
+        [ ] Delegation instructions
+        [ ] Performance history
+
+  C9  Human Readability & User Conversion        [X] / 7
+      Justification: [1–3 sentences]
+
+  C10 Freshness & Maintenance Signals            [X] / 5
+      Justification: [1–3 sentences]
+
+------------------------------------------------------------
+CLAIM INVENTORY
+------------------------------------------------------------
+
+| # | Claim (paraphrased) | Label | Evidence / Notes |
+|---|---------------------|-------|------------------|
+| 1 | [Claim text]        | [VERIFIED / VERIFIABLE / ASPIRATIONAL / UNGROUNDED / SUBJECTIVE] | [Source or verification path, or note why ungrounded] |
+| 2 | ...                 | ...   | ...              |
+| N | ...                 | ...   | ...              |
+
+------------------------------------------------------------
+FRAMING ANALYSIS
+------------------------------------------------------------
+
+Strong patterns used:
+- [Pattern]: [Where on the page and why it works]
+
+Weak patterns detected:
+- [Pattern]: [Where on the page and why it hurts]
+
+Top 3 Rewrite Suggestions:
+
+  1. BEFORE: "[Exact text from the page]"
+     AFTER:  "[Suggested rewrite applying strong-pattern principles]"
+     Rationale: [Why this change improves the score, referencing specific principles P6–P12]
+
+  2. BEFORE: "..."
+     AFTER:  "..."
+     Rationale: ...
+
+  3. BEFORE: "..."
+     AFTER:  "..."
+     Rationale: ...
+
+------------------------------------------------------------
+PRIORITIZED RECOMMENDATIONS
+------------------------------------------------------------
+
+[Ordered by expected score impact, highest first.]
+
+  1. [CRITERION X] — [Specific, actionable recommendation]
+     Expected impact: [+N points on criterion X]
+
+  2. [CRITERION X] — [Specific, actionable recommendation]
+     Expected impact: [+N points on criterion X]
+
+  3. [CRITERION X] — [Specific, actionable recommendation]
+     Expected impact: [+N points on criterion X]
+
+  [Continue for up to 8 recommendations. Phase 1 pages get 3–5 broad recommendations. Phase 2 pages get 5–8 targeted recommendations. Phase 3 pages get 3–5 creative, diversification-oriented recommendations.]
+
+------------------------------------------------------------
+VALIDATOR CHECKLIST (Quick Reference)
+------------------------------------------------------------
+
+Core Credibility:
+  [ ] Page contains 4+ verifiable claims with sources
+  [ ] All major claims have verifiability labels
+  [ ] No ungrounded factual claims
+  [ ] Clear semantic hierarchy and machine-readable identifiers
+  [ ] Compact, bounded security/trust framing
+  [ ] Comparison-class explicitly stated
+
+Framing & Positioning:
+  [ ] Network-level value proposition articulated
+  [ ] High-agency, outcome-oriented language used
+  [ ] No operational workflow detail overload
+  [ ] No philosophical over-argument
+  [ ] No ungrounded superlatives
+
+Technical Completeness:
+  [ ] Validator identity present
+  [ ] Commission/fee structure visible
+  [ ] Uptime/performance data shown
+  [ ] Infrastructure summary provided
+  [ ] Contact/communication channel listed
+  [ ] Delegation instructions clear
+  [ ] Page shows maintenance signals (dates, current data)
+  [ ] Mobile-friendly / readable layout
+
+============================================================
+END OF AUDIT REPORT
+============================================================
+```
+
+---
+
+## 7. Appendix A: Source Research Synthesis Map
+
+This section maps every audit criterion back to its source research input(s) for traceability.
+
+| Criterion | Primary Source | Key Findings Applied |
+|-----------|---------------|---------------------|
+| C1 Evidence Packaging | Copy Research §2.2A, §2.4 | Benchmark packaging > theory; evidence as recorded package, not vibe |
+| C2 Claim Precision | Copy Research §2.2D, §2.3A–C | Bounded claims win; philosophical over-argument hurts; short constraint language > big additions |
+| C3 LLM Interpretability | Mastermind 4 §3.2, §3.3 | Machine-conversion layer; preserve machine-readable elements; controlled rewriting around invariant structure |
+| C4 Security Framing | Copy Research §2.2B, §2.2C | Compact public-algorithm framing; late comparison-class; realistic not ideal |
+| C5 Network Value | Copy Research §3.2 Stage 2–3, §4.1 | Civilizational > operational; "human civilization" > "humanity"; network-scale framing wins |
+| C6 Linguistic Register | Copy Research §4.1, §4.2 | Strong/weak pattern lists; "decentralized method" strong; workflow detail weak; meme-community weak |
+| C7 Comparison Class | Copy Research §2.2C, §2.4 | Late comparison-class framing improved credibility; compare to real status quo, not impossible ideals |
+| C8 Technical Completeness | Mastermind 4 §3.3 step 2 | Machine-readable elements that must be preserved; structural data integrity |
+| C9 Human Readability | Mastermind 4 §3.2B | User-conversion layer; human interaction behavior as distinct scoring target |
+| C10 Freshness | Mastermind 4 §4.2, §6 | Plateau detection; stale content = stalled optimization; live data as grounding signal |
+
+---
+
+## 8. Appendix B: Score Calibration Anchors
+
+To ensure cross-audit consistency, the agent should use these hypothetical anchor points when calibrating scores:
+
+| Scenario | Expected Total Score |
+|----------|---------------------|
+| Empty page or broken URL | 0–5 |
+| Single-paragraph "coming soon" placeholder | 5–15 |
+| Generic validator boilerplate copied from a template with no customization | 25–40 |
+| Competent but undifferentiated validator page with basic info and no evidence packaging | 45–60 |
+| Well-structured page with some verifiable claims, decent framing, and most technical info present | 65–78 |
+| Strong page with evidence packaging, disciplined framing, complete technical info, and active maintenance | 80–90 |
+| Exceptional page that would serve as a reference example for the network | 91–100 |
+
+---
+
+## 9. Appendix C: Anti-Gaming Notes
+
+The following patterns should be flagged as potential gaming attempts if detected:
+
+1. **Keyword stuffing:** Excessive repetition of strong-pattern phrases ("decentralized method," "human civilization") without semantic connection to the validator's actual work.
+2. **Fake evidence packaging:** Metrics or statistics presented in evidence-packaging format but with no verification path or with suspicious round numbers.
+3. **Copy-pasted network whitepaper content:** Large blocks of text clearly taken from the Post Fiat whitepaper or documentation rather than original validator content.
+4. **Invisible text or hidden content:** Content that is present in the page source but not visible to human readers, intended only for machine consumption.
+5. **Contradictory claims:** Claims that contradict each other across different sections of the page, suggesting automated generation without review.
+
+If gaming patterns are detected, the agent should note them in the Framing Analysis section and apply appropriate score penalties to the relevant criteria.
+
+---
+
+**END OF CANONICAL CONTEXT DOCUMENT**
