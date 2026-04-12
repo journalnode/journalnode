@@ -1,9 +1,9 @@
 const fs = require('fs');
 const path = require('path');
 const { callModel } = require('./openrouter');
+const { createPublicGist, getGitHubGistToken, slugify } = require('./githubGist');
 
 const CANONICAL_AUDIT_CONTEXT_PATH = path.join(__dirname, '..', 'docs', 'post-fiat-validator-webpage-audit.txt');
-const GITHUB_GIST_API_URL = 'https://api.github.com/gists';
 const FETCH_TIMEOUT_MS = 15000;
 const MAX_HTML_CHARS = 400000;
 const MAX_PAGE_TEXT_CHARS = 30000;
@@ -20,7 +20,7 @@ function getAuditModelById(modelId) {
 }
 
 function getAuditGistToken() {
-  return process.env.GITHUB_GIST_TOKEN || process.env.GITHUB_TOKEN || '';
+  return getGitHubGistToken();
 }
 
 function isPrivateIpv4(hostname) {
@@ -231,54 +231,17 @@ async function runValidatorAudit({ url, modelId }) {
   };
 }
 
-function slugify(value) {
-  return String(value || '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 60) || 'validator-page';
-}
-
 async function createPublicAuditGist({ pageUrl, modelId, report }) {
-  const token = getAuditGistToken();
-  if (!token) {
-    throw new Error('GitHub gist publishing is not configured. Set GITHUB_GIST_TOKEN or GITHUB_TOKEN.');
-  }
-
   const parsedUrl = new URL(pageUrl);
   const dateStamp = new Date().toISOString().slice(0, 10);
-  const fileName = `audit-${slugify(parsedUrl.hostname)}-${dateStamp}.md`;
+  const fileName = `audit-${slugify(parsedUrl.hostname, 'validator-page')}-${dateStamp}.md`;
 
-  const res = await fetch(GITHUB_GIST_API_URL, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: 'application/vnd.github+json',
-      'Content-Type': 'application/json',
-      'User-Agent': 'JournalNodeAuditBot/0.1',
-      'X-GitHub-Api-Version': '2022-11-28',
-    },
-    body: JSON.stringify({
-      description: `Validator webpage audit for ${pageUrl} via ${modelId}`,
-      public: true,
-      files: {
-        [fileName]: {
-          content: report,
-        },
-      },
-    }),
+  return createPublicGist({
+    description: `Validator webpage audit for ${pageUrl} via ${modelId}`,
+    fileName,
+    content: report,
+    userAgent: 'JournalNodeAuditBot/0.1',
   });
-
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`GitHub gist creation failed (${res.status}). ${body}`);
-  }
-
-  const data = await res.json();
-  return {
-    htmlUrl: data.html_url,
-    id: data.id,
-  };
 }
 
 module.exports = {

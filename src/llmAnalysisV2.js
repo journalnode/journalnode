@@ -99,6 +99,145 @@ function standardDeviation(values, meanValue) {
   return Math.sqrt(variance);
 }
 
+function normalizeStringArray(value, limit = 4) {
+  return Array.isArray(value)
+    ? value.map(item => String(item || '').trim()).filter(Boolean).slice(0, limit)
+    : [];
+}
+
+function normalizeGroundingItems(value, limit = 4) {
+  return Array.isArray(value)
+    ? value
+      .map(item => ({
+        claim: String(item?.claim || '').trim(),
+        classification: String(item?.classification || '').trim() || 'UNVERIFIABLE',
+      }))
+      .filter(item => item.claim)
+      .slice(0, limit)
+    : [];
+}
+
+function pickStrongestPoint(points, fallback) {
+  return points[0] || fallback;
+}
+
+function clipInline(value, max = 90) {
+  const text = String(value || '').replace(/\s+/g, ' ').trim();
+  if (text.length <= max) return text;
+  return `${text.slice(0, max - 3)}...`;
+}
+
+function buildBullBearVerdict(parsedWinner, arbiterScore) {
+  const normalized = String(parsedWinner || '').toLowerCase();
+  if (normalized === 'bullish') return arbiterScore >= 35 ? 'Bullish' : 'Leaning Bullish';
+  if (normalized === 'bearish') return arbiterScore <= -35 ? 'Bearish' : 'Leaning Bearish';
+  if (arbiterScore >= 35) return 'Bullish';
+  if (arbiterScore <= -35) return 'Bearish';
+  if (arbiterScore > 10) return 'Leaning Bullish';
+  if (arbiterScore < -10) return 'Leaning Bearish';
+  return 'Neutral / Inconclusive';
+}
+
+function buildBullBearRefinementNotes({ request, dataGrounding, riskFlags, semanticDecay, recursiveResearch }) {
+  const notes = [];
+  const unverifiableClaims = dataGrounding.filter(item => item.classification === 'UNVERIFIABLE');
+  const plausibleClaims = dataGrounding.filter(item => item.classification === 'PLAUSIBLE');
+
+  if (unverifiableClaims.length) {
+    notes.push(`Replace or source the weakest claims: ${unverifiableClaims.map(item => item.claim).join(' | ')}`);
+  }
+  if (plausibleClaims.length) {
+    notes.push(`Upgrade plausible but thin claims with numbers or named catalysts: ${plausibleClaims.map(item => item.claim).join(' | ')}`);
+  }
+  if (!request.supportingData) {
+    notes.push('Add supporting data such as growth metrics, revenue, token unlocks, liquidity, or competitor comparisons.');
+  }
+  if (!request.timeframe) {
+    notes.push('Specify the time horizon so catalysts and risk windows can be judged against a concrete clock.');
+  }
+  if (semanticDecay) {
+    notes.push('Tighten the thesis wording. The current framing is too mixed or vague for a clean directional read.');
+  }
+  if (recursiveResearch) {
+    notes.push('Run deeper follow-up research on the highest-spread claim before treating this as a production-grade signal.');
+  }
+  if (riskFlags.length) {
+    notes.push(`Address the main unresolved risks directly: ${riskFlags.join(' | ')}`);
+  }
+
+  return notes.slice(0, 4);
+}
+
+function buildBullBearGistMarkdown({ request, analysis }) {
+  const lines = [
+    '# Bullish/Bearish Thesis Report',
+    '',
+    '## Metadata',
+    `- Generated: ${analysis.generatedAt}`,
+    `- Asset: ${request.asset}`,
+    `- Mode: Bullish/Bearish v2`,
+    `- Time Horizon: ${request.timeframe || 'Not provided'}`,
+    `- Current Price: ${typeof request.currentPrice === 'number' ? request.currentPrice : 'Not provided'}`,
+    `- Market Cap: ${typeof request.marketCap === 'number' ? request.marketCap : 'Not provided'}`,
+    '',
+    '## Submitted Thesis',
+    request.thesis,
+  ];
+
+  if (request.supportingData) {
+    lines.push('', '## Supporting Data', request.supportingData);
+  }
+
+  lines.push(
+    '',
+    '## Directional Verdict',
+    `- Verdict: ${analysis.directionalVerdict}`,
+    `- Debate Winner: ${analysis.debateWinner}`,
+    `- Arbiter Score: ${analysis.arbiterScore >= 0 ? '+' : ''}${analysis.arbiterScore}`,
+    `- Bull Score: ${analysis.bullScore}/100`,
+    `- Bear Score: ${analysis.bearScore}/100`,
+    `- Confidence: ${analysis.confidenceLabel}`,
+    `- Semantic Decay: ${analysis.semanticDecay ? 'ON' : 'OFF'}`,
+    `- Recursive Research: ${analysis.recursiveResearch ? 'YES' : 'NO'}`,
+    '',
+    '## Strongest Bull Case',
+    analysis.strongestBullCase,
+    '',
+    '## Strongest Bear Case',
+    analysis.strongestBearCase,
+    '',
+    '## Key Uncertainties And Caveats'
+  );
+
+  for (const item of analysis.keyUncertainties) {
+    lines.push(`- ${item}`);
+  }
+
+  lines.push('', '## Refinement Notes');
+  for (const item of analysis.refinementNotes) {
+    lines.push(`- ${item}`);
+  }
+
+  lines.push(
+    '',
+    '## Arbiter Synthesis',
+    analysis.arbiterSummary,
+    '',
+    '## CTS Hooks',
+    `- Consensus Alignment: ${analysis.consensusAlignmentNote}`,
+    `- Thesis Coherence: ${analysis.thesisCoherenceNote}`
+  );
+
+  if (analysis.dataGrounding.length) {
+    lines.push('', '## Data Grounding');
+    for (const item of analysis.dataGrounding) {
+      lines.push(`- ${item.classification}: ${item.claim}`);
+    }
+  }
+
+  return lines.join('\n').trim();
+}
+
 async function runBullBearMode(request) {
   const prompt = `${HARSH_JUDGE_BLOCK}
 
@@ -145,37 +284,83 @@ Return JSON with this shape:
   const spread = Math.abs(bullScore - bearScore);
   const semanticDecay = Boolean(parsed.semanticDecay) || (Math.abs(arbiterScore) < 15 && spread < 20);
   const recursiveResearch = Boolean(parsed.recursiveResearch) || spread > 60;
+  const bullPoints = normalizeStringArray(parsed.bullPoints);
+  const bearPoints = normalizeStringArray(parsed.bearPoints);
+  const riskFlags = normalizeStringArray(parsed.riskFlags, 3);
+  const dataGrounding = normalizeGroundingItems(parsed.dataGrounding);
+  const directionalVerdict = buildBullBearVerdict(parsed.debateWinner, arbiterScore);
+  const strongestBullCase = pickStrongestPoint(bullPoints, 'No clear bull case was returned.');
+  const strongestBearCase = pickStrongestPoint(bearPoints, 'No clear bear case was returned.');
+  const keyUncertainties = riskFlags.length
+    ? riskFlags
+    : ['The model did not return explicit risk flags, which itself lowers trust in the thesis.'];
+  const refinementNotes = buildBullBearRefinementNotes({
+    request,
+    dataGrounding,
+    riskFlags: keyUncertainties,
+    semanticDecay,
+    recursiveResearch,
+  });
+  const generatedAt = new Date().toISOString();
 
   const summary = [
     `Beta Mode A | ${parsed.debateWinner || 'neutral'} | Arbiter SCS ${arbiterScore >= 0 ? '+' : ''}${arbiterScore}`,
     `Bull ${bullScore}/100 vs Bear ${bearScore}/100 | Spread ${spread} | Semantic decay ${semanticDecay ? 'ON' : 'OFF'} | Recursive research ${recursiveResearch ? 'YES' : 'NO'}`,
     '',
     '**Bull Catalyst Scout**',
-    ...((parsed.bullPoints || []).slice(0, 4).map(point => `- ${point}`)),
+    ...(bullPoints.map(point => `- ${point}`)),
     '',
     '**Bear Risk Auditor**',
-    ...((parsed.bearPoints || []).slice(0, 4).map(point => `- ${point}`)),
+    ...(bearPoints.map(point => `- ${point}`)),
     '',
     `**Arbiter** ${parsed.arbiterSummary || 'No arbiter summary returned.'}`,
     `**CTS Hooks** Consensus Alignment: ${parsed.consensusAlignmentNote || 'No note.'}`,
     `**CTS Hooks** Thesis Coherence: ${parsed.thesisCoherenceNote || 'No note.'}`,
   ];
 
-  if (Array.isArray(parsed.riskFlags) && parsed.riskFlags.length) {
-    summary.push(`**Risk Flags** ${parsed.riskFlags.slice(0, 3).join(' | ')}`);
+  if (riskFlags.length) {
+    summary.push(`**Risk Flags** ${riskFlags.join(' | ')}`);
   }
 
-  if (Array.isArray(parsed.dataGrounding) && parsed.dataGrounding.length) {
-    const claims = parsed.dataGrounding
-      .slice(0, 4)
+  if (dataGrounding.length) {
+    const claims = dataGrounding
       .map(item => `${item.classification}: ${item.claim}`)
       .join(' | ');
     summary.push(`**Data Grounding** ${claims}`);
   }
 
+  const analysis = {
+    generatedAt,
+    directionalVerdict,
+    debateWinner: parsed.debateWinner || 'neutral',
+    bullScore,
+    bearScore,
+    arbiterScore,
+    confidenceLabel: parsed.confidenceLabel || 'MEDIUM',
+    semanticDecay,
+    recursiveResearch,
+    strongestBullCase,
+    strongestBearCase,
+    keyUncertainties,
+    refinementNotes: refinementNotes.length ? refinementNotes : ['No additional refinement notes were generated.'],
+    arbiterSummary: parsed.arbiterSummary || 'No arbiter summary returned.',
+    consensusAlignmentNote: parsed.consensusAlignmentNote || 'No note.',
+    thesisCoherenceNote: parsed.thesisCoherenceNote || 'No note.',
+    dataGrounding,
+    bullPoints,
+    bearPoints,
+  };
+  const gistMarkdown = buildBullBearGistMarkdown({ request, analysis });
+  const oneLineSummary = `${request.asset}: ${directionalVerdict} | arbiter ${arbiterScore >= 0 ? '+' : ''}${arbiterScore} | strongest bull: ${clipInline(strongestBullCase)} | strongest bear: ${clipInline(strongestBearCase)}`;
+
   return {
     title: 'Bullish/Bearish v2',
     description: summary.join('\n'),
+    analysis,
+    gist: {
+      markdown: gistMarkdown,
+      oneLineSummary,
+    },
   };
 }
 
