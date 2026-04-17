@@ -39,6 +39,8 @@ const menuCmd = require('./commands/menu');
 commands.set(menuCmd.name, menuCmd);
 const analyzeCmd = require('./commands/analyze');
 commands.set(analyzeCmd.name, analyzeCmd);
+const bullishBearishCmd = require('./commands/bullishbearish');
+commands.set(bullishBearishCmd.name, bullishBearishCmd);
 const llmAnalyzeV2Cmd = require('./commands/llmanalyzev2');
 commands.set(llmAnalyzeV2Cmd.name, llmAnalyzeV2Cmd);
 const faqCmd = require('./commands/faq');
@@ -229,6 +231,9 @@ const analyzeBuilder = new SlashCommandBuilder()
   .setDescription(analyzeCmd.description);
 slashCommands.push(analyzeBuilder.toJSON());
 
+const bullishBearishBuilder = bullishBearishCmd.buildCommand();
+slashCommands.push(bullishBearishBuilder.toJSON());
+
 const llmAnalyzeV2Builder = llmAnalyzeV2Cmd.buildCommand();
 slashCommands.push(llmAnalyzeV2Builder.toJSON());
 
@@ -416,7 +421,7 @@ client.once('clientReady', async () => {
   try {
     console.log('Registering slash commands...');
     await rest.put(Routes.applicationCommands(client.user.id), { body: slashCommands });
-    const allNames = ['chat', 'postfiat', 'wallets', 'send', 'balance', 'mint', 'gallery', 'receive', 'onboard', 'trade', 'mytrades', 'menu', 'llmanalyze', 'llmanalyzev2', 'faq', 'tradehistory', 'chart', 'sendnft', 'thesis', 'compare', 'watchlist', 'stats', 'audit', 'hyperliquid'].map(c => `/${c}`).join(', ');
+    const allNames = ['chat', 'postfiat', 'wallets', 'send', 'balance', 'mint', 'gallery', 'receive', 'onboard', 'trade', 'mytrades', 'menu', 'llmanalyze', 'bullishbearish', 'llmanalyzev2', 'faq', 'tradehistory', 'chart', 'sendnft', 'thesis', 'compare', 'watchlist', 'stats', 'audit', 'hyperliquid'].map(c => `/${c}`).join(', ');
     console.log(`Registered ${slashCommands.length} slash commands: ${allNames}`);
   } catch (err) {
     console.error('Failed to register slash commands:', err);

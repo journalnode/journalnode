@@ -13,7 +13,8 @@ const {
   runStressTestMode,
   runVisionPipelineMode,
 } = require('../llmAnalysisV2');
-const { createPublicGist, getGitHubGistToken, slugify } = require('../githubGist');
+const { getGitHubGistToken } = require('../githubGist');
+const { sendBullBearGistResult } = require('./bullishbearishShared');
 
 const SESSION_TTL_MS = 1000 * 60 * 60 * 6;
 const sessions = new Map();
@@ -150,33 +151,6 @@ async function sendModeResult(interaction, modeName, result) {
   await interaction.editReply({ embeds: [embed], files });
 }
 
-async function sendBullBearGistResult(interaction, request, result) {
-  const dateStamp = new Date().toISOString().slice(0, 10);
-  const fileName = `llmanalyzev2-bullbear-${slugify(request.asset, 'asset')}-${dateStamp}.md`;
-  const gist = await createPublicGist({
-    description: `Bullish/Bearish thesis report for ${request.asset} via /llmanalyzev2`,
-    fileName,
-    content: result.gist.markdown,
-    userAgent: 'JournalNodeLlmAnalyzeV2/0.1',
-  });
-
-  const embed = new EmbedBuilder()
-    .setColor(0x0f766e)
-    .setTitle(`${result.title} | beta`)
-    .setDescription([
-      result.gist.oneLineSummary,
-      '',
-      `Public gist: ${gist.htmlUrl}`,
-    ].join('\n'))
-    .setFooter({ text: 'llmanalyzev2 | Bullish/Bearish' });
-
-  await interaction.editReply({
-    content: `Public gist: ${gist.htmlUrl}`,
-    embeds: [embed],
-    files: [],
-  });
-}
-
 module.exports = {
   name: 'llmanalyzev2',
   description: 'Beta four-mode crypto thesis analyzer with button-driven v2 outputs.',
@@ -255,7 +229,11 @@ module.exports = {
         return;
       }
       result = await runBullBearMode(request);
-      await sendBullBearGistResult(interaction, request, result);
+      await sendBullBearGistResult(interaction, request, result, {
+        commandName: 'llmanalyzev2',
+        footerLabel: 'llmanalyzev2 | Bullish/Bearish',
+        userAgent: 'JournalNodeLlmAnalyzeV2/0.1',
+      });
       return;
     }
     else if (mode === 'multivaluation') result = await runMultiValuationMode(request);
