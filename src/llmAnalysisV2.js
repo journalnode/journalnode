@@ -2,36 +2,46 @@ const { chat, chatWithMessages } = require('./openrouter');
 
 const TEMPERATURE_LADDER = [0.2, 0.3, 0.45, 0.6, 0.7];
 
-const HARSH_JUDGE_BLOCK = `You are implementing the canonical March 31, 2026 Journal Node methodology for LLM-optimized crypto analysis.
+const HARSH_JUDGE_BLOCK = `You are scoring one crypto investment thesis using the Canonical Bullish/Bearish/Range Scoring Spec v2.0.1.
 
-You are demanding, skeptical, and allergic to fake precision.
-- Do not reward weak theses with flattering language.
-- Distinguish evidence from framing.
-- Treat missing data as missing data, not as an invitation to hallucinate.
-- Keep outputs compact enough to be rendered in Discord.
-- Return only valid JSON with double-quoted keys and string values where needed.`;
+You are demanding, skeptical, and precise.
+- A 70 means genuinely good.
+- An 80+ means exceptional.
+- A 90+ is rare and must survive skepticism review.
+- Do not reward formatting more than substance.
+- Do not confuse citation with verification.
+- Do not hallucinate live verification when no live tool surface is present.
+- Return only valid JSON with double-quoted keys and values where needed.`;
 
-const DATA_GROUNDING_BLOCK = `DIMENSION 1 — DATA GROUNDING SCORING RULES:
+const DATA_GROUNDING_BLOCK = `DIMENSION 1 - DATA GROUNDING SCORING RULES:
 
-1. For every quantified claim in the thesis, classify it as VERIFIABLE, PLAUSIBLE, or UNVERIFIABLE.
+1. For every quantified claim in the thesis, classify it as VERIFIABLE, PLAUSIBLE, PLAUSIBLE-SELFREPORTED, or UNVERIFIABLE.
 2. UNVERIFIABLE claims receive zero credit toward Data Grounding.
 3. PLAUSIBLE claims count at half weight.
-4. Cited sources are not automatically verified.
-5. State the classification before assigning any data-grounding conclusion.`;
+4. PLAUSIBLE-SELFREPORTED claims count at quarter weight.
+5. Cited sources are not automatically verified.`;
 
 function buildContext(request) {
   const lines = [
     `Asset: ${request.asset}`,
+    `Direction: ${request.direction || 'Not provided'}`,
     `Trade thesis: ${request.thesis}`,
   ];
 
   if (request.timeframe) lines.push(`Time horizon: ${request.timeframe}`);
+  if (typeof request.rangeLower === 'number') lines.push(`Range lower bound: ${request.rangeLower}`);
+  if (typeof request.rangeUpper === 'number') lines.push(`Range upper bound: ${request.rangeUpper}`);
   if (typeof request.currentPrice === 'number') lines.push(`Current price: ${request.currentPrice}`);
   if (typeof request.marketCap === 'number') lines.push(`Current market cap USD: ${request.marketCap}`);
+  if (request.invalidation) lines.push(`Invalidation: ${request.invalidation}`);
+  if (request.catalyst) lines.push(`Catalyst: ${request.catalyst}`);
+  if (request.authorCounterCase) lines.push(`Author counter-case:\n${request.authorCounterCase}`);
+  if (request.consensusBlock) lines.push(`Consensus block:\n${request.consensusBlock}`);
   if (request.supportingData) lines.push(`Supporting data / notes:\n${request.supportingData}`);
   if (request.chartImageUrl) lines.push('Chart image: attached separately for vision-capable analysis.');
 
-  lines.push('If a required fact is missing, say so explicitly and downgrade confidence.');
+  lines.push('This command does not provide a live verification tool surface to the model in-session.');
+  lines.push('If a required fact is missing, say so explicitly and apply the relevant caps.');
   return lines.join('\n\n');
 }
 
@@ -105,20 +115,86 @@ function normalizeStringArray(value, limit = 4) {
     : [];
 }
 
-function normalizeGroundingItems(value, limit = 4) {
+function normalizeGroundingItems(value, limit = 8) {
   return Array.isArray(value)
     ? value
       .map(item => ({
+        id: Number(item?.id) || null,
         claim: String(item?.claim || '').trim(),
-        classification: String(item?.classification || '').trim() || 'UNVERIFIABLE',
+        source: String(item?.source || '').trim() || 'Not provided',
+        tier: String(item?.tier || '').trim().toUpperCase() || 'T4',
+        loadBearing: Boolean(item?.loadBearing),
+        classification: String(item?.classification || '').trim().toUpperCase() || 'UNVERIFIABLE',
       }))
       .filter(item => item.claim)
       .slice(0, limit)
     : [];
 }
 
-function pickStrongestPoint(points, fallback) {
-  return points[0] || fallback;
+function normalizeVerificationRecords(value, limit = 8) {
+  return Array.isArray(value)
+    ? value
+      .map(item => ({
+        claimId: Number(item?.claimId) || null,
+        claim: String(item?.claim || '').trim(),
+        toolCalled: String(item?.toolCalled || '').trim() || 'none',
+        sourceReturned: String(item?.sourceReturned || '').trim() || 'UNREACHED',
+        tierReturned: String(item?.tierReturned || '').trim().toUpperCase() || 'UNREACHED',
+        timestamp: String(item?.timestamp || '').trim() || 'unknown',
+        match: Boolean(item?.match),
+        qualified: Boolean(item?.qualified),
+      }))
+      .slice(0, limit)
+    : [];
+}
+
+function normalizeCounterCase(value, limit = 6) {
+  return Array.isArray(value)
+    ? value
+      .map(item => ({
+        text: String(item?.text || item || '').trim(),
+        strongest: Boolean(item?.strongest),
+      }))
+      .filter(item => item.text)
+      .slice(0, limit)
+    : [];
+}
+
+function normalizeDimensionScores(value = {}) {
+  return {
+    dataGrounding: clampNumber(value.dataGrounding, 0, 20, 0),
+    thesisCoherence: clampNumber(value.thesisCoherence, 0, 20, 0),
+    counterThesis: clampNumber(value.counterThesis, 0, 20, 0),
+    riskIdentification: clampNumber(value.riskIdentification, 0, 20, 0),
+    consensusEngagement: clampNumber(value.consensusEngagement, 0, 20, 0),
+    timingCatalyst: clampNumber(value.timingCatalyst, 0, 20, 0),
+    catalystSubscore: clampNumber(value.catalystSubscore, 0, 10, 0),
+    whyNotPricedInSubscore: clampNumber(value.whyNotPricedInSubscore, 0, 10, 0),
+  };
+}
+
+function normalizeTextMap(value = {}) {
+  return {
+    dataGrounding: String(value.dataGrounding || '').trim() || 'No note.',
+    thesisCoherence: String(value.thesisCoherence || '').trim() || 'No note.',
+    counterThesis: String(value.counterThesis || '').trim() || 'No note.',
+    riskIdentification: String(value.riskIdentification || '').trim() || 'No note.',
+    consensusEngagement: String(value.consensusEngagement || '').trim() || 'No note.',
+    timingCatalyst: String(value.timingCatalyst || '').trim() || 'No note.',
+  };
+}
+
+function normalizeStringList(value, limit = 6) {
+  return Array.isArray(value)
+    ? value.map(item => String(item || '').trim()).filter(Boolean).slice(0, limit)
+    : [];
+}
+
+function formatRangeBounds(request) {
+  if (request.direction !== 'RANGE') return 'n/a';
+  const lower = typeof request.rangeLower === 'number' ? request.rangeLower : 'missing';
+  const upper = typeof request.rangeUpper === 'number' ? request.rangeUpper : 'missing';
+  return `${lower} / ${upper}`;
 }
 
 function clipInline(value, max = 90) {
@@ -127,234 +203,286 @@ function clipInline(value, max = 90) {
   return `${text.slice(0, max - 3)}...`;
 }
 
-function buildBullBearVerdict(parsedWinner, arbiterScore) {
-  const normalized = String(parsedWinner || '').toLowerCase();
-  if (normalized === 'bullish') return arbiterScore >= 35 ? 'Bullish' : 'Leaning Bullish';
-  if (normalized === 'bearish') return arbiterScore <= -35 ? 'Bearish' : 'Leaning Bearish';
-  if (arbiterScore >= 35) return 'Bullish';
-  if (arbiterScore <= -35) return 'Bearish';
-  if (arbiterScore > 10) return 'Leaning Bullish';
-  if (arbiterScore < -10) return 'Leaning Bearish';
-  return 'Neutral / Inconclusive';
-}
-
-function buildBullBearRefinementNotes({ request, dataGrounding, riskFlags, semanticDecay, recursiveResearch }) {
-  const notes = [];
-  const unverifiableClaims = dataGrounding.filter(item => item.classification === 'UNVERIFIABLE');
-  const plausibleClaims = dataGrounding.filter(item => item.classification === 'PLAUSIBLE');
-
-  if (unverifiableClaims.length) {
-    notes.push(`Replace or source the weakest claims: ${unverifiableClaims.map(item => item.claim).join(' | ')}`);
-  }
-  if (plausibleClaims.length) {
-    notes.push(`Upgrade plausible but thin claims with numbers or named catalysts: ${plausibleClaims.map(item => item.claim).join(' | ')}`);
-  }
-  if (!request.supportingData) {
-    notes.push('Add supporting data such as growth metrics, revenue, token unlocks, liquidity, or competitor comparisons.');
-  }
-  if (!request.timeframe) {
-    notes.push('Specify the time horizon so catalysts and risk windows can be judged against a concrete clock.');
-  }
-  if (semanticDecay) {
-    notes.push('Tighten the thesis wording. The current framing is too mixed or vague for a clean directional read.');
-  }
-  if (recursiveResearch) {
-    notes.push('Run deeper follow-up research on the highest-spread claim before treating this as a production-grade signal.');
-  }
-  if (riskFlags.length) {
-    notes.push(`Address the main unresolved risks directly: ${riskFlags.join(' | ')}`);
-  }
-
-  return notes.slice(0, 4);
-}
-
 function buildBullBearGistMarkdown({ request, analysis }) {
   const lines = [
-    '# Bullish/Bearish Thesis Report',
+    '## Bullish/Bearish/Range Thesis Score Report (v2.0.1)',
+    '',
+    `**Asset:** ${request.asset}`,
+    `**Direction:** ${request.direction || 'Not provided'}`,
+    `**Range Bounds:** ${formatRangeBounds(request)}`,
+    `**Timeframe:** ${request.timeframe || 'Not provided'}`,
+    `**Command Validity:** ${analysis.commandValidity}`,
+    '',
+    '### 1. Thesis Summary',
+    analysis.thesisSummary,
+    '',
+    '### 2. Quantified Claim Classification',
+    '| # | Claim | Source | Tier | Load-Bearing? | Label |',
+    '|---|-------|--------|------|---------------|-------|',
+  ];
+
+  if (analysis.claimTable.length) {
+    for (const item of analysis.claimTable) {
+      lines.push(`| ${item.id ?? ''} | ${item.claim} | ${item.source} | ${item.tier} | ${item.loadBearing ? 'yes' : 'no'} | ${item.classification} |`);
+    }
+  } else {
+    lines.push('| - | None extracted | - | - | - | - |');
+  }
+
+  lines.push(
+    '',
+    '### 3. Verification Records',
+    '| # | Claim | Tool Called | Source Returned | Tier | Timestamp | Match? | Qualified? |',
+    '|---|-------|-------------|-----------------|------|-----------|--------|------------|',
+  );
+
+  if (analysis.verificationRecords.length) {
+    for (const item of analysis.verificationRecords) {
+      lines.push(`| ${item.claimId ?? ''} | ${item.claim || ''} | ${item.toolCalled} | ${item.sourceReturned} | ${item.tierReturned} | ${item.timestamp} | ${item.match ? 'yes' : 'no'} | ${item.qualified ? 'yes' : 'no'} |`);
+    }
+  } else {
+    lines.push('| - | No live verification records | none | UNREACHED | UNREACHED | unknown | no | no |');
+  }
+
+  lines.push('', '### 4. Judge-Generated Counter-Case');
+  if (analysis.counterCase.length) {
+    for (const item of analysis.counterCase) lines.push(`- ${item.strongest ? '*' : ''}${item.text}`);
+  } else {
+    lines.push('- No counter-case returned.');
+  }
+
+  lines.push(
+    '',
+    '### 5. Dimension Scores',
+    '| Dimension | Score / 20 | Key Reason |',
+    '|-----------|------------|------------|',
+    `| Data Grounding | ${analysis.dimensionScores.dataGrounding} | ${analysis.keyReasons.dataGrounding} |`,
+    `| Thesis Coherence (edge: ${analysis.edgeClass}) | ${analysis.dimensionScores.thesisCoherence} | ${analysis.keyReasons.thesisCoherence} |`,
+    `| Counter-Thesis Coverage | ${analysis.dimensionScores.counterThesis} | ${analysis.keyReasons.counterThesis} |`,
+    `| Risk Identification | ${analysis.dimensionScores.riskIdentification} | ${analysis.keyReasons.riskIdentification} |`,
+    `| Consensus Engagement | ${analysis.dimensionScores.consensusEngagement} | ${analysis.keyReasons.consensusEngagement} |`,
+    `| Timing & Catalyst (catalyst ${analysis.dimensionScores.catalystSubscore}/10 + why-not-priced-in ${analysis.dimensionScores.whyNotPricedInSubscore}/10) | ${analysis.dimensionScores.timingCatalyst} | ${analysis.keyReasons.timingCatalyst} |`,
+    '',
+    '### 6. Deduction Log',
+    `- Data Grounding: ${analysis.deductionLog.dataGrounding}`,
+    `- Thesis Coherence: ${analysis.deductionLog.thesisCoherence}`,
+    `- Counter-Thesis Coverage: ${analysis.deductionLog.counterThesis}`,
+    `- Risk Identification: ${analysis.deductionLog.riskIdentification}`,
+    `- Consensus Engagement: ${analysis.deductionLog.consensusEngagement}`,
+    `- Timing & Catalyst: ${analysis.deductionLog.timingCatalyst}`,
+    '',
+    '### 7. Caps Applied',
+    `- Individual: ${analysis.capsApplied.individual}`,
+    `- Global floor (missing structural elements: ${analysis.missingStructuralElements.length}): ${analysis.capsApplied.globalFloor}`,
+    '',
+    '### 8. Composite',
+    `- BB_raw: ${analysis.composite.bbRaw} / 120`,
+    `- BB_score: ${analysis.composite.bbScore} / 100`,
+    `- Classification: ${analysis.composite.classification}`,
+    '',
+    '### 9. Skepticism Review (if applicable)',
+    `- Triggered: ${analysis.skepticismReview.triggered ? 'yes' : 'no'}`,
+    `- Adversarial summary: ${analysis.skepticismReview.adversarialSummary}`,
+    `- Re-scored composite: ${analysis.skepticismReview.rescoredComposite}`,
+    `- Final composite: ${analysis.skepticismReview.finalComposite}`,
+    '',
+    '### 10. Verdict',
+    analysis.verdict,
+    '',
+    '### 11. Highest-Impact Fixes',
+  );
+
+  if (analysis.highestImpactFixes.length) {
+    analysis.highestImpactFixes.forEach((item, idx) => lines.push(`${idx + 1}. ${item}`));
+  } else {
+    lines.push('1. No fixes returned.');
+  }
+
+  lines.push('', '### 12. Exceptional-Score Justifications (if any 18+)');
+  if (analysis.exceptionalJustifications.length) {
+    for (const item of analysis.exceptionalJustifications) lines.push(`- ${item}`);
+  } else {
+    lines.push('- None.');
+  }
+
+  lines.push(
+    '',
+    '### 13. Calibration Log Reference',
+    `- thesis_id: ${analysis.calibrationLog.thesisId}`,
+    `- settlement target date: ${analysis.calibrationLog.settlementTargetDate}`,
+    `- VR-qualified ratio: ${analysis.calibrationLog.vrQualifiedRatio}`,
     '',
     '## Metadata',
     `- Generated: ${analysis.generatedAt}`,
     `- Asset: ${request.asset}`,
-    `- Mode: Bullish/Bearish v2`,
+    `- Mode: Bullish/Bearish v2.0.1`,
     `- Time Horizon: ${request.timeframe || 'Not provided'}`,
     `- Current Price: ${typeof request.currentPrice === 'number' ? request.currentPrice : 'Not provided'}`,
     `- Market Cap: ${typeof request.marketCap === 'number' ? request.marketCap : 'Not provided'}`,
     '',
     '## Submitted Thesis',
     request.thesis,
-  ];
-
-  if (request.supportingData) {
-    lines.push('', '## Supporting Data', request.supportingData);
-  }
-
-  lines.push(
-    '',
-    '## Directional Verdict',
-    `- Verdict: ${analysis.directionalVerdict}`,
-    `- Debate Winner: ${analysis.debateWinner}`,
-    `- Arbiter Score: ${analysis.arbiterScore >= 0 ? '+' : ''}${analysis.arbiterScore}`,
-    `- Bull Score: ${analysis.bullScore}/100`,
-    `- Bear Score: ${analysis.bearScore}/100`,
-    `- Confidence: ${analysis.confidenceLabel}`,
-    `- Semantic Decay: ${analysis.semanticDecay ? 'ON' : 'OFF'}`,
-    `- Recursive Research: ${analysis.recursiveResearch ? 'YES' : 'NO'}`,
-    '',
-    '## Strongest Bull Case',
-    analysis.strongestBullCase,
-    '',
-    '## Strongest Bear Case',
-    analysis.strongestBearCase,
-    '',
-    '## Key Uncertainties And Caveats'
   );
 
-  for (const item of analysis.keyUncertainties) {
-    lines.push(`- ${item}`);
-  }
-
-  lines.push('', '## Refinement Notes');
-  for (const item of analysis.refinementNotes) {
-    lines.push(`- ${item}`);
-  }
-
-  lines.push(
-    '',
-    '## Arbiter Synthesis',
-    analysis.arbiterSummary,
-    '',
-    '## CTS Hooks',
-    `- Consensus Alignment: ${analysis.consensusAlignmentNote}`,
-    `- Thesis Coherence: ${analysis.thesisCoherenceNote}`
-  );
-
-  if (analysis.dataGrounding.length) {
-    lines.push('', '## Data Grounding');
-    for (const item of analysis.dataGrounding) {
-      lines.push(`- ${item.classification}: ${item.claim}`);
-    }
-  }
-
+  if (request.supportingData) lines.push('', '## Supporting Data', request.supportingData);
   return lines.join('\n').trim();
 }
 
 async function runBullBearMode(request) {
   const prompt = `${HARSH_JUDGE_BLOCK}
 
-Mode: A — Three-Agent Bullish/Bearish Debate.
+Score the thesis as a single demanding judge under the fixed v2.0.1 process.
 
-Simulate three roles:
-- Bull Catalyst Scout
-- Bear Risk Auditor
-- Semantic Arbiter
+Important command constraint:
+- No live verification tools are available to you in this session.
+- You may classify stable historical facts as VERIFIABLE only when they are older than 6 months and high-confidence.
+- Otherwise, any post-cutoff or current-market claim without a qualified live Verification Record must not be marked VERIFIABLE.
+- Because no live verification tool surface exists here, you should normally apply the verification-related data-grounding caps when load-bearing claims depend on current data.
 
-Use the whitepaper rules:
-- Produce a net SCS-style arbiter score from -100 to 100.
-- Bull and bear conviction scores are 0 to 100.
-- Flag semantic decay when the evidence is too mixed, too vague, or too dependent on missing data.
-- Trigger recursive research when the bull/bear spread is greater than 60.
-- Mention how this mode feeds Consensus Alignment and Thesis Coherence.
-- Apply the anti-sycophancy stance: the arbiter must adjudicate, not split the difference diplomatically.
-
-${DATA_GROUNDING_BLOCK}
-
-Return JSON with this shape:
+Return JSON with this exact shape:
 {
-  "bullScore": 0,
-  "bearScore": 0,
-  "arbiterScore": 0,
-  "semanticDecay": true,
-  "recursiveResearch": false,
-  "debateWinner": "bullish|bearish|neutral",
-  "dataGrounding": [{"claim":"", "classification":"VERIFIABLE|PLAUSIBLE|UNVERIFIABLE"}],
-  "bullPoints": ["", "", ""],
-  "bearPoints": ["", "", ""],
-  "arbiterSummary": "",
-  "consensusAlignmentNote": "",
-  "thesisCoherenceNote": "",
-  "riskFlags": ["", ""],
-  "confidenceLabel": "LOW|MEDIUM|HIGH"
+  "commandValidity": "VALID|INPUT_INVALID",
+  "missingFields": [""],
+  "thesisSummary": "",
+  "claimTable": [
+    {"id":1,"claim":"","source":"","tier":"T0|T1|T2|T3|T4","loadBearing":true,"classification":"VERIFIABLE|PLAUSIBLE|PLAUSIBLE-SELFREPORTED|UNVERIFIABLE"}
+  ],
+  "verificationRecords": [
+    {"claimId":1,"claim":"","toolCalled":"none","sourceReturned":"UNREACHED","tierReturned":"UNREACHED|T0|T1|T2|T3|T4","timestamp":"unknown","match":false,"qualified":false}
+  ],
+  "counterCase": [
+    {"text":"","strongest":true}
+  ],
+  "dimensionScores": {
+    "dataGrounding": 0,
+    "thesisCoherence": 0,
+    "counterThesis": 0,
+    "riskIdentification": 0,
+    "consensusEngagement": 0,
+    "timingCatalyst": 0,
+    "catalystSubscore": 0,
+    "whyNotPricedInSubscore": 0
+  },
+  "edgeClass": "DIFFERENTIATED|CONVENTIONAL|RESTATEMENT|STALE",
+  "keyReasons": {
+    "dataGrounding": "",
+    "thesisCoherence": "",
+    "counterThesis": "",
+    "riskIdentification": "",
+    "consensusEngagement": "",
+    "timingCatalyst": ""
+  },
+  "deductionLog": {
+    "dataGrounding": "",
+    "thesisCoherence": "",
+    "counterThesis": "",
+    "riskIdentification": "",
+    "consensusEngagement": "",
+    "timingCatalyst": ""
+  },
+  "capsApplied": {
+    "individual": "",
+    "globalFloor": ""
+  },
+  "missingStructuralElements": [""],
+  "composite": {
+    "bbRaw": 0,
+    "bbScore": 0,
+    "classification": "Exceptional|Strong|Competent|Developing|Weak|Unacceptable"
+  },
+  "skepticismReview": {
+    "triggered": false,
+    "adversarialSummary": "",
+    "rescoredComposite": "n/a",
+    "finalComposite": "n/a"
+  },
+  "verdict": "",
+  "highestImpactFixes": ["", "", ""],
+  "exceptionalJustifications": [""],
+  "calibrationLog": {
+    "thesisId": "",
+    "settlementTargetDate": "",
+    "vrQualifiedRatio": ""
+  }
 }`;
 
-  const raw = await chat(prompt, buildContext(request), { maxTokens: 1400, temperature: 0.35 });
+  const raw = await chat(prompt, buildContext(request), { maxTokens: 2200, temperature: 0.25 });
   const parsed = await parseJsonWithRepair(raw);
-  const bullScore = clampNumber(parsed.bullScore, 0, 100, 50);
-  const bearScore = clampNumber(parsed.bearScore, 0, 100, 50);
-  const arbiterScore = clampNumber(parsed.arbiterScore, -100, 100, 0);
-  const spread = Math.abs(bullScore - bearScore);
-  const semanticDecay = Boolean(parsed.semanticDecay) || (Math.abs(arbiterScore) < 15 && spread < 20);
-  const recursiveResearch = Boolean(parsed.recursiveResearch) || spread > 60;
-  const bullPoints = normalizeStringArray(parsed.bullPoints);
-  const bearPoints = normalizeStringArray(parsed.bearPoints);
-  const riskFlags = normalizeStringArray(parsed.riskFlags, 3);
-  const dataGrounding = normalizeGroundingItems(parsed.dataGrounding);
-  const directionalVerdict = buildBullBearVerdict(parsed.debateWinner, arbiterScore);
-  const strongestBullCase = pickStrongestPoint(bullPoints, 'No clear bull case was returned.');
-  const strongestBearCase = pickStrongestPoint(bearPoints, 'No clear bear case was returned.');
-  const keyUncertainties = riskFlags.length
-    ? riskFlags
-    : ['The model did not return explicit risk flags, which itself lowers trust in the thesis.'];
-  const refinementNotes = buildBullBearRefinementNotes({
-    request,
-    dataGrounding,
-    riskFlags: keyUncertainties,
-    semanticDecay,
-    recursiveResearch,
-  });
+  const commandValidity = String(parsed.commandValidity || 'INPUT_INVALID').trim().toUpperCase();
+  const claimTable = normalizeGroundingItems(parsed.claimTable);
+  const verificationRecords = normalizeVerificationRecords(parsed.verificationRecords);
+  const counterCase = normalizeCounterCase(parsed.counterCase);
+  const dimensionScores = normalizeDimensionScores(parsed.dimensionScores);
+  const keyReasons = normalizeTextMap(parsed.keyReasons);
+  const deductionLog = normalizeTextMap(parsed.deductionLog);
+  const missingStructuralElements = normalizeStringList(parsed.missingStructuralElements, 8);
+  const highestImpactFixes = normalizeStringList(parsed.highestImpactFixes, 3);
+  const exceptionalJustifications = normalizeStringList(parsed.exceptionalJustifications, 4);
+  const bbRaw = clampNumber(parsed?.composite?.bbRaw, 0, 120, 0);
+  const bbScore = clampNumber(parsed?.composite?.bbScore, 0, 100, Math.round((bbRaw / 120) * 100));
+  const classification = String(parsed?.composite?.classification || 'Unacceptable').trim() || 'Unacceptable';
   const generatedAt = new Date().toISOString();
+  const skepticismReview = {
+    triggered: Boolean(parsed?.skepticismReview?.triggered),
+    adversarialSummary: String(parsed?.skepticismReview?.adversarialSummary || '').trim() || 'n/a',
+    rescoredComposite: String(parsed?.skepticismReview?.rescoredComposite ?? 'n/a'),
+    finalComposite: String(parsed?.skepticismReview?.finalComposite ?? bbScore),
+  };
+  const capsApplied = {
+    individual: String(parsed?.capsApplied?.individual || '').trim() || 'None stated.',
+    globalFloor: String(parsed?.capsApplied?.globalFloor || '').trim() || 'None stated.',
+  };
+  const calibrationLog = {
+    thesisId: String(parsed?.calibrationLog?.thesisId || '').trim() || 'n/a',
+    settlementTargetDate: String(parsed?.calibrationLog?.settlementTargetDate || '').trim() || 'n/a',
+    vrQualifiedRatio: String(parsed?.calibrationLog?.vrQualifiedRatio || '').trim() || '0 / 0',
+  };
+  const thesisSummary = String(parsed.thesisSummary || '').trim() || 'No thesis summary returned.';
+  const verdict = String(parsed.verdict || '').trim() || 'No verdict returned.';
+  const strongestCounter = counterCase.find(item => item.strongest)?.text || counterCase[0]?.text || 'No counter-case returned.';
+  const oneLineSummary = `${request.asset}: ${bbScore}/100 ${classification} | ${request.direction || 'UNKNOWN'} | strongest counter: ${clipInline(strongestCounter)}`;
 
   const summary = [
-    `Beta Mode A | ${parsed.debateWinner || 'neutral'} | Arbiter SCS ${arbiterScore >= 0 ? '+' : ''}${arbiterScore}`,
-    `Bull ${bullScore}/100 vs Bear ${bearScore}/100 | Spread ${spread} | Semantic decay ${semanticDecay ? 'ON' : 'OFF'} | Recursive research ${recursiveResearch ? 'YES' : 'NO'}`,
+    `Bull/Bear v2.0.1 | ${request.direction || 'UNKNOWN'} | ${bbScore}/100 ${classification}`,
+    `Data ${dimensionScores.dataGrounding}/20 | Coherence ${dimensionScores.thesisCoherence}/20 | Counter ${dimensionScores.counterThesis}/20 | Risk ${dimensionScores.riskIdentification}/20 | Consensus ${dimensionScores.consensusEngagement}/20 | Timing ${dimensionScores.timingCatalyst}/20`,
     '',
-    '**Bull Catalyst Scout**',
-    ...(bullPoints.map(point => `- ${point}`)),
-    '',
-    '**Bear Risk Auditor**',
-    ...(bearPoints.map(point => `- ${point}`)),
-    '',
-    `**Arbiter** ${parsed.arbiterSummary || 'No arbiter summary returned.'}`,
-    `**CTS Hooks** Consensus Alignment: ${parsed.consensusAlignmentNote || 'No note.'}`,
-    `**CTS Hooks** Thesis Coherence: ${parsed.thesisCoherenceNote || 'No note.'}`,
+    `**Validity** ${commandValidity}`,
+    `**Summary** ${thesisSummary}`,
+    `**Verdict** ${verdict}`,
+    `**Strongest Counter** ${strongestCounter}`,
+    `**Caps** ${capsApplied.individual}`,
   ];
 
-  if (riskFlags.length) {
-    summary.push(`**Risk Flags** ${riskFlags.join(' | ')}`);
-  }
-
-  if (dataGrounding.length) {
-    const claims = dataGrounding
-      .map(item => `${item.classification}: ${item.claim}`)
-      .join(' | ');
-    summary.push(`**Data Grounding** ${claims}`);
-  }
+  if (highestImpactFixes.length) summary.push(`**Top Fixes** ${highestImpactFixes.join(' | ')}`);
 
   const analysis = {
     generatedAt,
-    directionalVerdict,
-    debateWinner: parsed.debateWinner || 'neutral',
-    bullScore,
-    bearScore,
-    arbiterScore,
-    confidenceLabel: parsed.confidenceLabel || 'MEDIUM',
-    semanticDecay,
-    recursiveResearch,
-    strongestBullCase,
-    strongestBearCase,
-    keyUncertainties,
-    refinementNotes: refinementNotes.length ? refinementNotes : ['No additional refinement notes were generated.'],
-    arbiterSummary: parsed.arbiterSummary || 'No arbiter summary returned.',
-    consensusAlignmentNote: parsed.consensusAlignmentNote || 'No note.',
-    thesisCoherenceNote: parsed.thesisCoherenceNote || 'No note.',
-    dataGrounding,
-    bullPoints,
-    bearPoints,
+    commandValidity,
+    thesisSummary,
+    claimTable,
+    verificationRecords,
+    counterCase,
+    dimensionScores,
+    edgeClass: String(parsed.edgeClass || 'CONVENTIONAL').trim().toUpperCase(),
+    keyReasons,
+    deductionLog,
+    capsApplied,
+    missingStructuralElements,
+    composite: {
+      bbRaw,
+      bbScore,
+      classification,
+    },
+    skepticismReview,
+    verdict,
+    highestImpactFixes,
+    exceptionalJustifications,
+    calibrationLog,
   };
   const gistMarkdown = buildBullBearGistMarkdown({ request, analysis });
-  const oneLineSummary = `${request.asset}: ${directionalVerdict} | arbiter ${arbiterScore >= 0 ? '+' : ''}${arbiterScore} | strongest bull: ${clipInline(strongestBullCase)} | strongest bear: ${clipInline(strongestBearCase)}`;
 
   return {
-    title: 'Bullish/Bearish v2',
+    title: 'Bullish/Bearish v2.0.1',
     description: summary.join('\n'),
     analysis,
     gist: {
@@ -367,7 +495,7 @@ Return JSON with this shape:
 async function runMultiValuationMode(request) {
   const prompt = `${HARSH_JUDGE_BLOCK}
 
-Mode: B — Peer-Anchored Multi-Valuation.
+Mode: B - Peer-Anchored Multi-Valuation.
 
 Simulate a valuation panel using these personas:
 - Howard Marks
@@ -458,7 +586,7 @@ Return JSON:
 async function runStressTestMode(request) {
   const prompt = `${HARSH_JUDGE_BLOCK}
 
-Mode: C — Stochastic Stress Test.
+Mode: C - Stochastic Stress Test.
 
 You are testing whether the thesis conviction survives temperature variation.
 
@@ -518,7 +646,7 @@ Rules:
     '**Temperature Ladder**',
     ladder,
     '',
-    `**Interpretation** A low CV means the thesis survives perturbation away from default agreeableness. A high CV means the apparent conviction may be prompt-sensitive or sycophantic.`,
+    '**Interpretation** A low CV means the thesis survives perturbation away from default agreeableness. A high CV means the apparent conviction may be prompt-sensitive or sycophantic.',
   ];
 
   if (uncertainties) {
@@ -534,7 +662,7 @@ Rules:
 async function runVisionPipelineMode(request) {
   const prompt = `${HARSH_JUDGE_BLOCK}
 
-Mode: D — Vision Pipeline + Contrarian Trap Detector.
+Mode: D - Vision Pipeline + Contrarian Trap Detector.
 
 You are a technical analyst and contrarian trap detector.
 

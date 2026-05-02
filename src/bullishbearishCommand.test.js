@@ -5,10 +5,10 @@ require.cache[llmAnalysisV2Path] = {
   loaded: true,
   exports: {
     runBullBearMode: async request => ({
-      title: 'Bullish/Bearish v2',
+      title: 'Bullish/Bearish v2.0.1',
       gist: {
         markdown: `# Report\n\nAsset: ${request.asset}`,
-        oneLineSummary: `${request.asset}: Bullish | arbiter +42`,
+        oneLineSummary: `${request.asset}: 53/100 Developing | ${request.direction}`,
       },
     }),
   },
@@ -57,9 +57,12 @@ function buildInteraction() {
       getString(name) {
         const map = {
           asset: 'PFT',
+          direction: 'BULLISH',
           thesis: 'Validator demand and treasury credibility can rerate the token.',
           time_horizon: '90 days',
           supporting_data: 'Revenue is improving and supply unlock pressure is easing.',
+          invalidation: 'Treasury credibility breaks or validator demand stalls.',
+          catalyst: 'Next quarter validator growth update.',
         };
         return map[name] ?? null;
       },
@@ -85,6 +88,7 @@ async function runAll() {
     const json = bullishBearishCmd.buildCommand().toJSON();
     assert(json.name === 'bullishbearish', `unexpected command name: ${json.name}`);
     assert(json.options.some(opt => opt.name === 'thesis'), 'thesis option missing');
+    assert(json.options.some(opt => opt.name === 'direction'), 'direction option missing');
   });
 
   await test('execute runs bull/bear report and returns public gist link', async () => {

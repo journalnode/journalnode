@@ -7,11 +7,21 @@ const { sendBullBearGistResult } = require('./bullishbearishShared');
 function buildCommand() {
   return new SlashCommandBuilder()
     .setName('bullishbearish')
-    .setDescription('Standalone bullish/bearish thesis analysis that returns a public gist report.')
+    .setDescription('Standalone bullish/bearish/range thesis scoring that returns a public gist report.')
     .addStringOption(opt =>
       opt.setName('asset')
         .setDescription('Asset symbol or name, e.g. BTC, ETH, PFT')
         .setRequired(true)
+    )
+    .addStringOption(opt =>
+      opt.setName('direction')
+        .setDescription('Thesis direction')
+        .setRequired(true)
+        .addChoices(
+          { name: 'BULLISH', value: 'BULLISH' },
+          { name: 'BEARISH', value: 'BEARISH' },
+          { name: 'RANGE', value: 'RANGE' },
+        )
     )
     .addStringOption(opt =>
       opt.setName('thesis')
@@ -21,6 +31,16 @@ function buildCommand() {
     .addStringOption(opt =>
       opt.setName('time_horizon')
         .setDescription('Time window or catalyst horizon')
+        .setRequired(true)
+    )
+    .addNumberOption(opt =>
+      opt.setName('range_lower')
+        .setDescription('Required when direction is RANGE')
+        .setRequired(false)
+    )
+    .addNumberOption(opt =>
+      opt.setName('range_upper')
+        .setDescription('Required when direction is RANGE')
         .setRequired(false)
     )
     .addNumberOption(opt =>
@@ -36,6 +56,26 @@ function buildCommand() {
     .addStringOption(opt =>
       opt.setName('supporting_data')
         .setDescription('Optional metrics, peer comps, catalysts, or key facts')
+        .setRequired(false)
+    )
+    .addStringOption(opt =>
+      opt.setName('invalidation')
+        .setDescription('What would make this thesis wrong')
+        .setRequired(false)
+    )
+    .addStringOption(opt =>
+      opt.setName('catalyst')
+        .setDescription('Primary catalyst or catalyst window')
+        .setRequired(false)
+    )
+    .addStringOption(opt =>
+      opt.setName('author_counter_case')
+        .setDescription('Optional explicit counter-case authored by the user')
+        .setRequired(false)
+    )
+    .addStringOption(opt =>
+      opt.setName('consensus_block')
+        .setDescription('Optional consensus positioning or sentiment block')
         .setRequired(false)
     );
 }
@@ -56,15 +96,29 @@ module.exports = {
 
     const request = {
       asset: interaction.options.getString('asset', true).trim(),
+      direction: interaction.options.getString('direction', true).trim().toUpperCase(),
       thesis: interaction.options.getString('thesis', true).trim(),
-      timeframe: interaction.options.getString('time_horizon'),
+      timeframe: interaction.options.getString('time_horizon', true).trim(),
+      rangeLower: interaction.options.getNumber('range_lower'),
+      rangeUpper: interaction.options.getNumber('range_upper'),
       currentPrice: interaction.options.getNumber('current_price'),
       marketCap: interaction.options.getNumber('market_cap'),
       supportingData: interaction.options.getString('supporting_data'),
+      invalidation: interaction.options.getString('invalidation'),
+      catalyst: interaction.options.getString('catalyst'),
+      authorCounterCase: interaction.options.getString('author_counter_case'),
+      consensusBlock: interaction.options.getString('consensus_block'),
       chartImageUrl: null,
       createdAt: Date.now(),
       ownerId: interaction.user.id,
     };
+
+    if (request.direction === 'RANGE' && (!Number.isFinite(request.rangeLower) || !Number.isFinite(request.rangeUpper))) {
+      await interaction.editReply({
+        content: 'Bullish/Bearish failed: RANGE theses require both `range_lower` and `range_upper`.',
+      });
+      return;
+    }
 
     const result = await runBullBearMode(request);
     await sendBullBearGistResult(interaction, request, result, {
