@@ -4,6 +4,26 @@ const { runBullBearMode } = require('../llmAnalysisV2');
 const { getGitHubGistToken } = require('../githubGist');
 const { sendBullBearGistResult } = require('./bullishbearishShared');
 
+function normalizeOptionalString(value) {
+  const text = String(value || '').trim();
+  return text || null;
+}
+
+function inferDirection(request) {
+  const haystack = [
+    request.thesis,
+    request.supportingData,
+    request.catalyst,
+    request.consensusBlock,
+  ].filter(Boolean).join(' ').toUpperCase();
+
+  if (Number.isFinite(request.rangeLower) && Number.isFinite(request.rangeUpper)) return 'RANGE';
+  if (/\bRANGE\b|\bRANGEBOUND\b|\bSIDEWAYS\b/.test(haystack)) return 'RANGE';
+  if (/\bBEARISH\b|\bSHORT\b|\bDOWNSIDE\b/.test(haystack)) return 'BEARISH';
+  if (/\bBULLISH\b|\bLONG\b|\bUPSIDE\b/.test(haystack)) return 'BULLISH';
+  return null;
+}
+
 function buildCommand() {
   return new SlashCommandBuilder()
     .setName('bullishbearish')
@@ -96,22 +116,38 @@ module.exports = {
 
     const request = {
       asset: interaction.options.getString('asset', true).trim(),
-      direction: interaction.options.getString('direction', true).trim().toUpperCase(),
+      direction: normalizeOptionalString(interaction.options.getString('direction'))?.toUpperCase() || null,
       thesis: interaction.options.getString('thesis', true).trim(),
-      timeframe: interaction.options.getString('time_horizon', true).trim(),
+      timeframe: normalizeOptionalString(interaction.options.getString('time_horizon')),
       rangeLower: interaction.options.getNumber('range_lower'),
       rangeUpper: interaction.options.getNumber('range_upper'),
       currentPrice: interaction.options.getNumber('current_price'),
       marketCap: interaction.options.getNumber('market_cap'),
-      supportingData: interaction.options.getString('supporting_data'),
-      invalidation: interaction.options.getString('invalidation'),
-      catalyst: interaction.options.getString('catalyst'),
-      authorCounterCase: interaction.options.getString('author_counter_case'),
-      consensusBlock: interaction.options.getString('consensus_block'),
+      supportingData: normalizeOptionalString(interaction.options.getString('supporting_data')),
+      invalidation: normalizeOptionalString(interaction.options.getString('invalidation')),
+      catalyst: normalizeOptionalString(interaction.options.getString('catalyst')),
+      authorCounterCase: normalizeOptionalString(interaction.options.getString('author_counter_case')),
+      consensusBlock: normalizeOptionalString(interaction.options.getString('consensus_block')),
       chartImageUrl: null,
       createdAt: Date.now(),
       ownerId: interaction.user.id,
     };
+
+    request.direction = request.direction || inferDirection(request);
+
+    if (!request.direction) {
+      await interaction.editReply({
+        content: 'Bullish/Bearish failed: missing `direction`. Re-run the command with `BULLISH`, `BEARISH`, or `RANGE`. If Discord is still showing the old command form, wait for slash-command refresh or restart the bot so the new options register.',
+      });
+      return;
+    }
+
+    if (!request.timeframe) {
+      await interaction.editReply({
+        content: 'Bullish/Bearish failed: missing `time_horizon`. Re-run the command with a timeframe like `7 days`, `30 days`, or `Q3 2026`.',
+      });
+      return;
+    }
 
     if (request.direction === 'RANGE' && (!Number.isFinite(request.rangeLower) || !Number.isFinite(request.rangeUpper))) {
       await interaction.editReply({
