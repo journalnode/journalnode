@@ -67,7 +67,7 @@ async function runAll() {
 
   await test('audit models are restricted to the two supported choices', async () => {
     assert(AUDIT_MODELS.length === 2, `expected 2 audit models, got ${AUDIT_MODELS.length}`);
-    assert(getAuditModelById('openai/gpt-5.4')?.name === 'ChatGPT 5.4', 'missing ChatGPT 5.4');
+    assert(getAuditModelById('openai/gpt-5.5')?.name === 'ChatGPT 5.5', 'missing ChatGPT 5.5');
     assert(getAuditModelById('anthropic/claude-opus-4.6')?.name === 'Claude Opus 4.6', 'missing Claude Opus 4.6');
     assert(getAuditModelById('openai/gpt-5.2-chat') === null, 'unexpected extra model support');
   });
