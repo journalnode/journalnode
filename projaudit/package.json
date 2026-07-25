@@ -1,0 +1,13 @@
+{
+  "name": "journalnode-projaudit",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Serverless backend scaffold for the Journal Node /projaudit audit pipeline.",
+  "engines": {
+    "node": "24.x"
+  },
+  "scripts": {
+    "dev": "npx vercel dev",
+    "test": "node --test tests/*.test.js"
+  }
+}
